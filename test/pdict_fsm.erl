@@ -1,4 +1,7 @@
-%%% Copyright 2010-2011 Manolis Papadakis <manopapad@gmail.com>,
+%%% -*- coding: utf-8 -*-
+%%% -*- erlang-indent-level: 2 -*-
+%%% -------------------------------------------------------------------
+%%% Copyright 2010-2014 Manolis Papadakis <manopapad@gmail.com>,
 %%%                     Eirini Arvaniti <eirinibob@gmail.com>
 %%%                 and Kostis Sagonas <kostis@cs.ntua.gr>
 %%%
@@ -17,12 +20,14 @@
 %%% You should have received a copy of the GNU General Public License
 %%% along with PropEr.  If not, see <http://www.gnu.org/licenses/>.
 
-%%% @copyright 2010-2011 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
+%%% @copyright 2010-2014 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
 %%% @version {@version}
 %%% @author Eirini Arvaniti
 %%% @doc Simple fsm test for the process dictionary
 
 -module(pdict_fsm).
+-behaviour(proper_fsm).
+
 -export([test/0, test/1, sample_commands/0]).
 -export([initial_state/0, initial_state_data/0, precondition/4, weight/3,
 	 postcondition/5, next_state_data/5, empty_pdict/1, non_empty_pdict/1]).
@@ -31,6 +36,7 @@
 -include_lib("proper/include/proper.hrl").
 
 -define(KEYS, [a,b,c,d]).
+-define(WRAP(T), proper:test_to_outer_test(T)).
 
 %% A simple fsm test for the process dictionary; tests the
 %% operations erlang:put/2, erlang:get/1, erlang:erase/1
@@ -41,20 +47,20 @@ test() ->
 
 -spec test(_) -> any().
 test(N) ->
-    proper:quickcheck(?MODULE:prop_pdict(), N).
+    proper:quickcheck(?WRAP(prop_pdict()), N).
 
 -spec prop_pdict() -> any().
 prop_pdict() ->
     ?FORALL(Cmds, proper_fsm:commands(?MODULE),
 	    begin
+		set_up(),
 		{H,S,Res} = proper_fsm:run_commands(?MODULE, Cmds),
 		clean_up(),
 		?WHENFAIL(
-		   io:format("History: ~w\nState: ~w\nRes: ~w\n",
-			     [H, S, Res]),
+		   io:format("History: ~w\nState: ~w\nRes: ~w\n", [H, S, Res]),
 		   aggregate(zip(proper_fsm:state_names(H),
 				 command_names(Cmds)),
-			     Res == ok))
+			     Res =:= ok))
 	    end).
 
 -spec set_up() -> ok.
@@ -98,7 +104,7 @@ precondition(non_empty_pdict, empty_pdict, S, {call,erlang,erase,[Key]}) ->
     proplists:is_defined(Key, S) andalso proplists:delete(Key, S) =:= [];
 precondition(_, _, S, {call,erlang,get,[Key]}) ->
     proplists:is_defined(Key, S);
-precondition(_, _, _, _) ->
+precondition(_, _, _, {call,erlang,put,[_Key,_Val]}) ->
     true.
 
 -spec postcondition(_,_,_,_,_) -> boolean().
@@ -109,9 +115,7 @@ postcondition(_, _, Props, {call,erlang,put,[Key,_]}, Old) ->
 postcondition(_, _, Props, {call,erlang,get,[Key]}, Val) ->
     [{Key,Val}] =:= proplists:lookup_all(Key, Props);
 postcondition(_, _, Props, {call,erlang,erase,[Key]}, Val) ->
-    [{Key,Val}] =:= proplists:lookup_all(Key, Props);
-postcondition(_, _, _, _, _) ->
-    false.
+    [{Key,Val}] =:= proplists:lookup_all(Key, Props).
 
 -spec next_state_data(_,_,_,_,{call, erlang, erase | get | put, [any(),...]}) -> any().
 next_state_data(_, _, Props, _Var, {call,erlang,put,[Key,Value]}) ->

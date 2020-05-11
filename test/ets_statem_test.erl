@@ -1,4 +1,7 @@
-%%% Copyright 2010-2011 Manolis Papadakis <manopapad@gmail.com>,
+%%% -*- coding: utf-8 -*-
+%%% -*- erlang-indent-level: 2 -*-
+%%% -------------------------------------------------------------------
+%%% Copyright 2010-2020 Manolis Papadakis <manopapad@gmail.com>,
 %%%                     Eirini Arvaniti <eirinibob@gmail.com>
 %%%                 and Kostis Sagonas <kostis@cs.ntua.gr>
 %%%
@@ -17,20 +20,24 @@
 %%% You should have received a copy of the GNU General Public License
 %%% along with PropEr.  If not, see <http://www.gnu.org/licenses/>.
 
-%%% @copyright 2010-2011 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
+%%% @copyright 2010-2020 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
 %%% @version {@version}
 %%% @author Eirini Arvaniti
-%%% @doc Simple statem test for ets tables
+%%% @doc Simple statem test for ets tables.
+%%% This module is a variant of the similar module in the examples directory.
 
--module(ets_statem).
--export([initial_state/0, initial_state/1, command/1, precondition/2,
+-module(ets_statem_test).
+-behaviour(proper_statem).
+-compile([debug_info]).
+
+-export([initial_state/0, command/1, precondition/2,
 	 postcondition/3, next_state/3]).
 -export([set_up/0, clean_up/0]).
 
 -include_lib("proper/include/proper.hrl").
 
--type object() :: tuple().
--type table_type() :: set | ordered_set | bag | duplicate_bag.
+-type object()     :: tuple().
+-type table_type() :: 'set' | 'ordered_set' | 'bag' | 'duplicate_bag'.
 
 -record(state, {stored = []  :: [object()],     %% list of objects
 		                                %% stored in ets table
@@ -44,8 +51,8 @@
 %%% Generators
 
 -spec key() -> any().
-key() -> frequency([{5, integer_key()},
-		    {1, float_key()}]).
+key() ->
+    frequency([{5, integer_key()}, {1, float_key()}]).
 
 -spec integer_key() -> any().
 integer_key() ->
@@ -80,13 +87,13 @@ small_int() ->
 
 %%% Abstract state machine for ets table
 
+-spec initial_state() -> #state{stored::[],type::set}.
+initial_state() ->
+    initial_state(set).
+
 -spec initial_state(table_type()) -> #state{stored::[],type::table_type()}.
 initial_state(Type) ->
     #state{type = Type}.
-
--spec initial_state() -> #state{stored::[],type::set}.
-initial_state() ->
-    #state{}.
 
 -spec command(_) -> any().
 command(S) ->
@@ -117,8 +124,8 @@ next_state(S, _V, {call,_,update_counter,[?TAB,Key,Incr]}) ->
 	set ->
 	    Object = proplists:lookup(Key, S#state.stored),
 	    Value = element(2, Object),
-	    NewObj =  setelement(2, Object, Value + Incr),
-	    S#state{stored=keyreplace(Key, 1, S#state.stored, NewObj)};
+	    NewObj = setelement(2, Object, Value + Incr),
+	    S#state{stored = keyreplace(Key, 1, S#state.stored, NewObj)};
 	ordered_set ->
 	    Object = lists:keyfind(Key, 1, S#state.stored),
 	    Value = element(2, Object),
@@ -239,6 +246,7 @@ prop_ets() ->
 		catch ets:delete(?TAB),
 		?TAB = ets:new(?TAB, [Type, public, named_table]),
 		{H,S,Res} = run_commands(?MODULE, Cmds),
+		clean_up(),
 		?WHENFAIL(
 		   io:format("History: ~p\nState: ~p\nRes: ~p\n", [H,S,Res]),
 		   collect(Type, Res =:= ok))

@@ -1,4 +1,7 @@
-%%% Copyright 2010-2013 Manolis Papadakis <manopapad@gmail.com>,
+%%% -*- coding: utf-8 -*-
+%%% -*- erlang-indent-level: 2 -*-
+%%% -------------------------------------------------------------------
+%%% Copyright 2010-2018 Manolis Papadakis <manopapad@gmail.com>,
 %%%                     Eirini Arvaniti <eirinibob@gmail.com>
 %%%                 and Kostis Sagonas <kostis@cs.ntua.gr>
 %%%
@@ -17,7 +20,7 @@
 %%% You should have received a copy of the GNU General Public License
 %%% along with PropEr.  If not, see <http://www.gnu.org/licenses/>.
 
-%%% @copyright 2010-2013 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
+%%% @copyright 2010-2018 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
 %%% @version {@version}
 %%% @author Eirini Arvaniti
 
@@ -62,14 +65,14 @@
 %%% The following functions must be exported from the callback module
 %%% implementing the finite state machine:
 %%% <ul>
-%%% <li> `initial_state() ::' {@type state_name()}
+%%% <li> `initial_state() ->' {@type state_name()}
 %%%   <p>Specifies the initial state of the finite state machine. As with
 %%%   `proper_statem:initial_state/0', its result should be deterministic.
 %%%   </p></li>
-%%% <li> `initial_state_data() ::' {@type state_data()}
+%%% <li> `initial_state_data() ->' {@type state_data()}
 %%%   <p>Specifies what the state data should initially contain. Its result
 %%%   should be deterministic</p></li>
-%%% <li> `StateName(S::'{@type state_data()}`) ::'
+%%% <li> `StateName(S::'{@type state_data()}`) ->'
 %%%        `['{@type transition()}`]'
 %%%   <p>There should be one instance of this function for each reachable
 %%%   state `StateName' of the finite state machine. In case `StateName' is a
@@ -87,23 +90,23 @@
 %%%   them. This feature can be used to include conditional transitions that
 %%%   depend on the `StateData'.</p></li>
 %%% <li> `StateName(Attr1::term(), ..., AttrN::term(),
-%%%                 S::'{@type state_data()}`) ::'
+%%%                 S::'{@type state_data()}`) ->'
 %%%        `['{@type transition()}`]'
 %%%   <p>There should be one instance of this function for each reachable state
 %%%   `{StateName,Attr1,...,AttrN}' of the finite state machine. The function
 %%%   has similar beaviour to `StateName/1', described above.</p></li>
 %%% <li> `weight(From::'{@type state_name()}`,
 %%%              Target::'{@type state_name()}`,
-%%%              Call::'{@type symb_call()}`) :: integer()'
+%%%              Call::'{@type symbolic_call()}`) -> non_neg_integer()'
 %%%   <p>This is an optional callback. When it is not defined (or not exported),
 %%%   transitions are chosen with equal probability. When it is defined, it
-%%%   assigns an integer weight to transitions from `From' to `Target'
+%%%   assigns a non-negative integer weight to transitions from `From' to `Target'
 %%%   triggered by symbolic call `Call'. In this case, each transition is chosen
 %%%   with probability proportional to the weight assigned.</p></li>
 %%% <li> `precondition(From::'{@type state_name()}`,
 %%%                    Target::'{@type state_name()}`,
 %%%                    StateData::'{@type state_data()}`,
-%%%                    Call::'{@type symb_call()}`) :: boolean()'
+%%%                    Call::'{@type symbolic_call()}`) -> boolean()'
 %%%   <p>Similar to `proper_statem:precondition/2'. Specifies the
 %%%   precondition that should hold about `StateData' so that `Call' can be
 %%%   included in the command sequence. In case precondition doesn't hold, a
@@ -116,16 +119,16 @@
 %%% <li> `postcondition(From::'{@type state_name()}`,
 %%%                     Target::'{@type state_name()}`,
 %%%                     StateData::'{@type state_data()}`,
-%%%                     Call::'{@type symb_call()}`,
-%%%                     Res::'{@type result()}`) :: boolean()'
+%%%                     Call::'{@type symbolic_call()}`,
+%%%                     Res::'{@type cmd_result()}`) -> boolean()'
 %%%   <p>Similar to `proper_statem:postcondition/3'. Specifies the
 %%%   postcondition that should hold about the result `Res' of the evaluation
 %%%   of `Call'.</p></li>
 %%% <li> `next_state_data(From::'{@type state_name()}`,
 %%%                       Target::'{@type state_name()}`,
 %%%                       StateData::'{@type state_data()}`,
-%%%                       Res::'{@type result()}`,
-%%%                       Call::'{@type symb_call()}`) ::'
+%%%                       Res::'{@type cmd_result()}`,
+%%%                       Call::'{@type symbolic_call()}`) ->'
 %%%        {@type state_data()}
 %%%   <p>Similar to `proper_statem:next_state/3'. Specifies how the
 %%%   transition from `FromState' to `Target' triggered by `Call' affects the
@@ -144,15 +147,37 @@
 %%%                    cleanup(),
 %%%                    Result =:= ok
 %%%                end).'''
+%%%
+%%% == Stateful Targeted Testing ==
+%%% During testing of the system's behavior, there may be some failing command
+%%% sequences that the random property based testing does not find with ease,
+%%% or at all. In these cases, stateful targeted property based testing can help
+%%% find such edge cases, provided a utility value.
+%%%
+%%% ```prop_targeted_testing() ->
+%%%        ?FORALL_TARGETED(Cmds, proper_fsm:targeted_commands(?MODULE),
+%%%                         begin
+%%%                             {History, State, Result} = proper_fsm:run_commands(?MODULE, Cmds),
+%%%                             UV = uv(History, State, Result),
+%%%                             ?MAXIMIZE(UV),
+%%%                             cleanup(),
+%%%                             Result =:= ok
+%%%                         end).'''
+%%%
+%%% Νote that the `UV' value can be computed in any way fit, depending on the
+%%% use case. `uv/3' is used here as a dummy function which computes the
+%%% utility value.
 %%% @end
 
 -module(proper_fsm).
 
--export([behaviour_info/1]).
 -export([commands/1, commands/2, run_commands/2, run_commands/3,
 	 state_names/1]).
+-export([targeted_commands/1, targeted_commands/2]).
 -export([command/1, precondition/2, next_state/3, postcondition/3]).
 -export([target_states/4]).
+%% Exported for PropEr internal usage.
+-export([select_command/2]).
 
 -include("proper_internal.hrl").
 
@@ -161,22 +186,25 @@
 %% Type declarations
 %% -----------------------------------------------------------------------------
 
--type symb_var()   :: proper_statem:symb_var().
--type symb_call()  :: proper_statem:symb_call().
--type fsm_result() :: proper_statem:statem_result().
+-type symbolic_var() :: proper_statem:symbolic_var().
+-type symbolic_call():: proper_statem:symbolic_call().
+-type fsm_result()   :: proper_statem:statem_result().
 -type state_name()   :: atom() | tuple().
 %% @type state_data()
 -type state_data()   :: term().
 -type fsm_state()    :: {state_name(),state_data()}.
--type transition()   :: {state_name(),symb_call()}.
--type command()      :: {'set',symb_var(),symb_call()}
-			| {'init',fsm_state()}.
+-type transition()   :: {state_name(),symbolic_call()}.
+-type command()      :: {'set',symbolic_var(),symbolic_call()}
+		      | {'init',fsm_state()}.
 -type command_list() :: [command()].
 %% @type cmd_result()
 -type cmd_result()   :: term().
 -type history()      :: [{fsm_state(),cmd_result()}].
--type tmp_command()  ::   {'init',state()}
-		        | {'set',symb_var(),symb_call()}.
+-type tmp_command()  :: {'init',state()}
+		      | {'set',symbolic_var(),symbolic_call()}.
+-type weights()      :: #{{state_name(), state_name(), term()} =>
+                            pos_integer()}.
+-type next_fun()     :: proper_statem:next_fun().
 
 -record(state, {name :: state_name(),
 		data :: state_data(),
@@ -185,21 +213,25 @@
 
 
 %% -----------------------------------------------------------------------------
-%% Proper_fsm behaviour
-%% ----------------------------------------------------------------------------
+%% Proper_fsm behaviour callback functions
+%% -----------------------------------------------------------------------------
 
-%% @doc Specifies the callback functions that should be exported from a module
-%% implementing the `proper_fsm' behaviour.
+-callback initial_state() -> state_name().
 
--spec behaviour_info('callbacks') -> [{fun_name(),arity()}].
-behaviour_info(callbacks) ->
-    [{initial_state,0},
-     {initial_state_data,0},
-     {precondition,4},
-     {postcondition,5},
-     {next_state_data,5}];
-behaviour_info(_Attribute) ->
-    undefined.
+-callback initial_state_data() -> state_data().
+
+-callback precondition(state_name(), state_name(),
+		       state_data(), symbolic_call()) -> boolean().
+
+-callback postcondition(state_name(), state_name(), state_data(),
+			symbolic_call(), cmd_result()) -> boolean().
+
+-callback next_state_data(state_name(), state_name(), state_data(),
+			  cmd_result(), symbolic_call()) -> state_data().
+
+-callback weight(state_name(), state_name(), symbolic_call()) -> non_neg_integer().
+
+-optional_callbacks([weight/3]).
 
 
 %% -----------------------------------------------------------------------------
@@ -230,6 +262,33 @@ commands(Mod, {Name,Data} = InitialState) ->
     ?LET([_|Cmds],
 	 proper_statem:commands(?MODULE, State),
 	 [{init,InitialState}|Cmds]).
+
+%% @doc A special PropEr type which generates targeted command sequences,
+%% according to a finite state machine specification and taking into
+%% consideration a utility value. The function takes as input the name of
+%% the callback module, which contains the fsm specification.
+%% The initial state is computed by <br/>
+%% `{Mod:initial_state/0, Mod:initial_state_data/0}'.
+
+-spec targeted_commands(mod_name()) -> proper_types:type().
+targeted_commands(Mod) ->
+  proper_types:add_prop(is_user_nf_stateful, true,
+                        ?USERNF(targeted_commands_gen(Mod),
+                                next_commands_gen(Mod))).
+
+%% @doc Similar to {@link targeted_commands/1}, but generated command
+%% sequences always start at a given state. In this case, the first
+%% command is always <br/>
+%% `{init, InitialState = {Name, Data}}' and is used to correctly
+%% initialize the state every time the command sequence is run (i.e.
+%% during normal execution, while shrinking and when checking a
+%% counterexample).
+
+-spec targeted_commands(mod_name(), fsm_state()) -> proper_types:type().
+targeted_commands(Mod, InitialState) ->
+  proper_types:add_prop(is_user_nf_stateful, true,
+                        ?USERNF(targeted_commands_gen(Mod, InitialState),
+                                next_commands_gen(Mod, InitialState))).
 
 %% @doc Evaluates a given symbolic command sequence `Cmds' according to the
 %% finite state machine specified in `Mod'. The result is a triple of the
@@ -280,7 +339,7 @@ command(#state{name = From, data = Data, mod = Mod}) ->
     choose_transition(Mod, From, get_transitions(Mod, From, Data)).
 
 %% @private
--spec precondition(state(), symb_call()) -> boolean().
+-spec precondition(state(), symbolic_call()) -> boolean().
 precondition(#state{name = From, data = Data, mod = Mod}, Call) ->
     Targets = target_states(Mod, From, Data, Call),
     case [To || To <- Targets,
@@ -291,25 +350,127 @@ precondition(#state{name = From, data = Data, mod = Mod}, Call) ->
 	    true;
 	_ ->
 	    io:format(
-	      "\nError: The transition from \"~w\" state triggered by ~w "
-	      "call leads to multiple target states.\nUse the precondition/5 "
-              "callback to specify which target state should be chosen.\n",
+	      "~nError: The transition from \"~w\" state triggered by ~w "
+	      "call leads to multiple target states.~nUse the precondition/5 "
+              "callback to specify which target state should be chosen.~n",
 	      [From, get_mfa(Call)]),
 	    erlang:error(too_many_targets)
     end.
 
 %% @private
--spec next_state(state(), symb_var() | cmd_result(), symb_call()) -> state().
+-spec next_state(state(), symbolic_var() | cmd_result(), symbolic_call()) -> state().
 next_state(S = #state{name = From, data = Data, mod = Mod} , Var, Call) ->
     To = cook_history(From, transition_target(Mod, From, Data, Call)),
     S#state{name = To,
 	    data = Mod:next_state_data(From, To, Data, Var, Call)}.
 
 %% @private
--spec postcondition(state(), symb_call(), cmd_result()) -> boolean().
+-spec postcondition(state(), symbolic_call(), cmd_result()) -> boolean().
 postcondition(#state{name = From, data = Data, mod = Mod}, Call, Res) ->
     To = cook_history(From, transition_target(Mod, From, Data, Call)),
     Mod:postcondition(From, To, Data, Call, Res).
+
+
+%% -----------------------------------------------------------------------------
+%% Targeted command generation
+%% -----------------------------------------------------------------------------
+
+
+-spec targeted_commands_gen(mod_name()) -> proper_types:type().
+targeted_commands_gen(Mod) ->
+  State = initial_state(Mod),
+  ?LET([_ | Cmds], proper_statem:commands(?MODULE, State),
+       {finalize_weights(State, Cmds, maps:new()), Cmds}).
+
+-spec targeted_commands_gen(mod_name(), fsm_state()) -> proper_types:type().
+targeted_commands_gen(Mod, {Name, Data} = InitialState) ->
+  State = #state{name = Name, data = Data, mod = Mod},
+  ?LET([_ | Cmds], proper_statem:commands(?MODULE, State),
+       {finalize_weights(State, Cmds, maps:new()),
+        [{init, InitialState} | Cmds]}).
+
+-spec next_commands_gen(mod_name()) -> next_fun().
+next_commands_gen(Mod) ->
+  fun ({Weights, _Cmds}, {_D, T}) ->
+      State = initial_state(Mod),
+      NewWeights = proper_statem:next_weights(Weights, T),
+      CmdsGen = ?LET([_ | Cmds],
+                     proper_statem:next_gen(?MODULE, NewWeights, State),
+                     Cmds),
+      ?SHRINK(
+         ?LET(Cmds, ?LAZY(CmdsGen),
+              {finalize_weights(State, Cmds, NewWeights), Cmds}),
+         [CmdsGen])
+  end.
+
+-spec next_commands_gen(mod_name(), fsm_state()) -> next_fun().
+next_commands_gen(Mod, {Name, Data} = InitialState) ->
+  fun ({Weights, _Cmds}, {_D, T}) ->
+      State = #state{name = Name, data = Data, mod = Mod},
+      NewWeights = proper_statem:next_weights(Weights, T),
+      CmdsGen = ?LET([_ | Cmds],
+                     proper_statem:next_gen(?MODULE, NewWeights, State),
+                     [{init, InitialState} | Cmds]),
+      ?SHRINK(
+         ?LET(Cmds, ?LAZY(CmdsGen),
+              {finalize_weights(State, Cmds, NewWeights), Cmds}),
+         [CmdsGen])
+  end.
+
+%% Commands are selected according to the weights found in the
+%% map provided, or from a `weight/3' callback.
+
+%% @private
+-spec select_command(state(), weights()) -> proper_types:type().
+select_command(State, Weights) ->
+  #state{name = From, data = Data, mod = Mod} = State,
+  SelectAux =
+    fun ({To, {call, _Mod, Call, _Args} = SymbCall}) ->
+        RealTo = cook_history(From, To),
+        Key = {From, RealTo, Call},
+        Weight = case maps:is_key(Key, Weights) of
+                   true -> maps:get(Key, Weights);
+                   false ->
+                     case is_exported(Mod, {weight, 3}) of
+                       true -> Mod:weight(From, RealTo, SymbCall);
+                       false -> 1
+                     end
+                 end,
+        {Weight, SymbCall}
+    end,
+  Transitions = get_transitions(Mod, From, Data),
+  WeightedCmds = lists:map(SelectAux, Transitions),
+  proper_types:frequency(WeightedCmds).
+
+%% Track all the state transitions and add them to the weights map.
+
+-spec finalize_weights(state(), command_list(), weights()) -> weights().
+finalize_weights(_S, [], Weights) -> Weights;
+finalize_weights(InitialState, Cmds, Weights) ->
+  FinWeightsAux =
+    fun ({init, _InitialState}, Acc) -> Acc;
+        ({set, Var, SymbCall}, {State, Ws}) ->
+        #state{name = From, data = Data, mod = Mod} = State,
+        FoldAux =
+          fun ({To, {call, _M, Call, _A} = SC}, Acc) ->
+              RealTo = cook_history(From, To),
+              Key = {From, RealTo, Call},
+              W = case is_exported(Mod, {weight, 3}) of
+                    true -> Mod:weight(From, RealTo, SC);
+                    false -> 1
+                  end,
+              case maps:is_key(Key, Acc) of
+                true -> Acc;
+                false -> maps:put(Key, W, Acc)
+              end
+          end,
+        NextState = next_state(State, Var, SymbCall),
+        Transitions = get_transitions(Mod, From, Data),
+        NewWs = lists:foldl(FoldAux, Ws, Transitions),
+        {NextState, NewWs}
+    end,
+  {_S, NewWeights} = lists:foldl(FinWeightsAux, {InitialState, Weights}, Cmds),
+  NewWeights.
 
 
 %% -----------------------------------------------------------------------------
@@ -370,7 +531,7 @@ cook_history(_, To)         -> To.
 is_exported(Mod, Fun) ->
     lists:member(Fun, Mod:module_info(exports)).
 
--spec transition_target(mod_name(), state_name(), state_data(), symb_call()) ->
+-spec transition_target(mod_name(), state_name(), state_data(), symbolic_call()) ->
          state_name().
 transition_target(Mod, From, Data, Call) ->
     Targets = target_states(Mod, From, Data, Call),
@@ -379,12 +540,12 @@ transition_target(Mod, From, Data, Call) ->
     To.
 
 %% @private
--spec target_states(mod_name(), state_name(), state_data(), symb_call()) ->
+-spec target_states(mod_name(), state_name(), state_data(), symbolic_call()) ->
          [state_name()].
 target_states(Mod, From, StateData, Call) ->
     find_target(get_transitions(Mod, From, StateData), Call, []).
 
--spec find_target([transition()], symb_call(), [state_name()]) ->
+-spec find_target([transition()], symbolic_call(), [state_name()]) ->
          [state_name()].
 find_target([], _, Accum) -> Accum;
 find_target(Transitions, Call, Accum) ->
@@ -394,12 +555,12 @@ find_target(Transitions, Call, Accum) ->
 	false -> find_target(Rest, Call, Accum)
     end.
 
--spec is_compatible(symb_call(), symb_call()) -> boolean().
+-spec is_compatible(symbolic_call(), symbolic_call()) -> boolean().
 is_compatible({call,M,F,A1}, {call,M,F,A2})
   when length(A1) =:= length(A2) ->
     true;
 is_compatible(_, _) ->
     false.
 
--spec get_mfa(symb_call()) -> mfa().
+-spec get_mfa(symbolic_call()) -> mfa().
 get_mfa({call,M,F,A}) -> {M,F,length(A)}.

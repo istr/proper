@@ -1,4 +1,7 @@
-%%% Copyright 2010-2013 Manolis Papadakis <manopapad@gmail.com>,
+%%% -*- coding: utf-8 -*-
+%%% -*- erlang-indent-level: 2 -*-
+%%% -------------------------------------------------------------------
+%%% Copyright 2010-2017 Manolis Papadakis <manopapad@gmail.com>,
 %%%                     Eirini Arvaniti <eirinibob@gmail.com>
 %%%                 and Kostis Sagonas <kostis@cs.ntua.gr>
 %%%
@@ -17,7 +20,7 @@
 %%% You should have received a copy of the GNU General Public License
 %%% along with PropEr.  If not, see <http://www.gnu.org/licenses/>.
 
-%%% @copyright 2010-2013 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
+%%% @copyright 2010-2017 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
 %%% @version {@version}
 %%% @author Manolis Papadakis
 %%% @doc Parametric wrapper to dict module.
@@ -32,14 +35,7 @@
 
 -export_type([dict/2]).
 
-%% This would normally contain the internal representation of the ADT.
-%% This representation won't actually be used, so we could just use a dummy one.
-%% As with specs, unbound type variables are not allowed in '-type' declarations
-%% unless they begin with an underscore.
-
-%% When parsed by the typeserver, this becomes opaque (it's declared as a simple
-%% type because dialyzer can't handle parametric opaque types yet).
--type dict(_K,_V) :: dict().
+-opaque dict(K,V) :: dict:dict(K,V).
 
 %% Here are some valid symbolic calls that could be automatically produced using
 %% this module's exported functions, for the type dict(atom(),integer()):
@@ -53,10 +49,6 @@
 %% Notice that PropEr will never produce a call like this one:
 %%   {'$call',proper_dict,update,[aa,Fun,{'$call',proper_dict,new,[]}]}
 %% which would raise an exception if we tried to evaluate it.
-
-%% This header is only included so that the strip_types parse transform will be
-%% applied to this file as well.
--include("proper_internal.hrl").
 
 
 %%------------------------------------------------------------------------------

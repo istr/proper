@@ -1,4 +1,7 @@
-%%% Copyright 2010-2013 Manolis Papadakis <manopapad@gmail.com>,
+%%% -*- coding: utf-8 -*-
+%%% -*- erlang-indent-level: 2 -*-
+%%% -------------------------------------------------------------------
+%%% Copyright 2010-2017 Manolis Papadakis <manopapad@gmail.com>,
 %%%                     Eirini Arvaniti <eirinibob@gmail.com>
 %%%                 and Kostis Sagonas <kostis@cs.ntua.gr>
 %%%
@@ -17,7 +20,7 @@
 %%% You should have received a copy of the GNU General Public License
 %%% along with PropEr.  If not, see <http://www.gnu.org/licenses/>.
 
-%%% @copyright 2010-2013 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
+%%% @copyright 2010-2017 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
 %%% @version {@version}
 %%% @author Manolis Papadakis
 
@@ -51,12 +54,14 @@
 		   no_autos   = sets:new() :: proper_typeserver:mod_exp_funs(),
 		   exp_types  = sets:new() :: proper_typeserver:mod_exp_types(),
 		   exp_funs   = sets:new() :: proper_typeserver:mod_exp_funs(),
-		   helper_pid              :: pid()}).
+		   helper_pid              :: pid() | 'undefined'}).
 -type mod_info() :: #mod_info{}.
--type exp_dict() :: dict().
-%% dict(mod_name(),'no_data' | {'data',proper_typeserver:mod_exp_types(),
-%%                                     proper_typeserver:mod_exp_funs()})
 
+-type exp_mod_data () :: 'nodata'
+                       | {'data',
+			  proper_typeserver:mod_exp_types(),
+			  proper_typeserver:mod_exp_funs()}.
+-type exp_dict() :: dict:dict(mod_name(), exp_mod_data()).
 
 %%------------------------------------------------------------------------------
 %% Top-level functions
@@ -133,19 +138,12 @@ is_prop(_) ->
     false.
 
 -spec add_exports([abs_form()], [{fun_name(),arity()}]) -> [abs_form()].
-add_exports(Forms, ToExport) ->
-    add_exports_tr(Forms, [], ToExport).
-
--spec add_exports_tr([abs_form()], [abs_form()], [{fun_name(),arity()}]) ->
-	  [abs_form()].
-add_exports_tr([], Acc, _ToExport) ->
-    lists:reverse(Acc);
-add_exports_tr([{attribute,_,module,_} = ModAttr | Rest], Acc, ToExport) ->
-    ExpAttr = {attribute,0,export,ToExport},
-    lists:reverse(Acc) ++ [ModAttr, ExpAttr | Rest];
-add_exports_tr([Form | Rest], Acc, ToExport) ->
-    add_exports_tr(Rest, [Form | Acc], ToExport).
-
+add_exports([], _ToExport) -> [];
+add_exports([{attribute,_,module,_} = ModAttr | Rest], ToExport) ->
+    ExpAttr = {attribute,?anno(0),export,ToExport},
+    [ModAttr, ExpAttr | Rest];
+add_exports([Form | Rest], ToExport) ->
+    [Form | add_exports(Rest, ToExport)].
 
 %%------------------------------------------------------------------------------
 %% Helper server interface
@@ -223,6 +221,8 @@ rewrite_form(Form, _ModInfo) ->
     Form.
 
 -spec rewrite_field_init(abs_rec_field(), mod_info()) -> abs_rec_field().
+rewrite_field_init({typed_record_field,RecField,Type}, ModInfo) ->
+    {typed_record_field,rewrite_field_init(RecField, ModInfo),Type};
 rewrite_field_init({record_field,_Line,_FieldName} = FieldInit, _ModInfo) ->
     FieldInit;
 rewrite_field_init({record_field,Line,FieldName,InitExpr}, ModInfo) ->
@@ -277,6 +277,12 @@ rewrite_expr({call,Line,
     NewRawType = rewrite_type(RawType, ModInfo),
     NewProp = rewrite_expr(Prop, ModInfo),
     {call,Line,FunRef,[NewRawType,NewProp]};
+rewrite_expr({call, Line,
+              {remote,_,{atom,_,proper_types}, {atom, _, bind}} = FunRef,
+              [RawType, Gen, ShrinkToParts]}, ModInfo) ->
+    NewRawType = rewrite_type(RawType, ModInfo),
+    NewGen = rewrite_expr(Gen, ModInfo),
+    {call, Line, FunRef, [NewRawType,NewGen, ShrinkToParts]};
 rewrite_expr({call,Line,FunRef,Args}, ModInfo) ->
     NewFunRef = rewrite_expr(FunRef, ModInfo),
     NewArgs = [rewrite_expr(A,ModInfo) || A <- Args],
@@ -381,7 +387,8 @@ rewrite_type(Expr, _ModInfo) ->
 
 -spec native_type_call(mod_name(), abs_expr()) -> abs_expr().
 native_type_call(ModName, Expr) ->
-    AbsModName = {atom,0,ModName},
-    AbsTypeStr = {string,0,lists:flatten(erl_pp:expr(Expr))},
-    FunRef = {remote,0,{atom,0,proper_types},{atom,0,native_type}},
-    {call,0,FunRef,[AbsModName,AbsTypeStr]}.
+    L = ?anno(0),
+    AbsModName = {atom,L,ModName},
+    AbsTypeStr = {string,L,lists:flatten(erl_pp:expr(Expr))},
+    FunRef = {remote,L,{atom,L,proper_types},{atom,L,native_type}},
+    {call,L,FunRef,[AbsModName,AbsTypeStr]}.

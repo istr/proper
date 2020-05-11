@@ -4,13 +4,11 @@
 *.beam
 *.dump
 *.tar.gz
-ebin/
-deps/
 doc/*.css
 doc/*.html
 doc/*.png
 doc/edoc-info
-include/compile_flags.hrl
-.directory
-.eunit
-.dialyzer.plt
+rebar3
+rebar.lock
+ebin
+_build/

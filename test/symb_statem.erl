@@ -1,4 +1,7 @@
-%%% Copyright 2010-2011 Manolis Papadakis <manopapad@gmail.com>,
+%%% -*- coding: utf-8 -*-
+%%% -*- erlang-indent-level: 2 -*-
+%%% -------------------------------------------------------------------
+%%% Copyright 2010-2018 Manolis Papadakis <manopapad@gmail.com>,
 %%%                     Eirini Arvaniti <eirinibob@gmail.com>
 %%%                 and Kostis Sagonas <kostis@cs.ntua.gr>
 %%%
@@ -17,18 +20,27 @@
 %%% You should have received a copy of the GNU General Public License
 %%% along with PropEr.  If not, see <http://www.gnu.org/licenses/>.
 
-%%% @copyright 2010-2011 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
+%%% @copyright 2010-2018 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
 %%% @version {@version}
 %%% @author Eirini Arvaniti
+%%% @doc This module tests the use of symbolic calls in next_state/3.
 
 -module(symb_statem).
--compile(export_all).
+-behaviour(proper_statem).
+
+-export([command/1,
+	 initial_state/0, next_state/3,
+	 precondition/2, postcondition/3]).
+-export([foo/1, bar/1]).
+-export([prop_simple/0, prop_parallel_simple/0]).
 
 -include_lib("proper/include/proper.hrl").
 
 -record(state, {foo = [] :: list(),
 		bar = [] :: list()}).
+-type state() :: #state{}.
 
+-spec initial_state() -> state().
 initial_state() ->
     #state{}.
 
@@ -44,7 +56,7 @@ next_state(S = #state{foo=Foo}, V, {call,_,foo,[_Arg]}) ->
     S#state{foo = [V1|Foo]};
 next_state(S = #state{bar=Bar}, V, {call,_,bar,[_Arg]}) ->
     V1 = {call,erlang,hd,[V]},
-    S#state{foo = [V1|Bar]}.
+    S#state{bar = [V1|Bar]}.
 
 postcondition(S, {call,_,foo,[_Arg]}, Res) when is_tuple(Res) ->
     lists:all(fun is_integer/1, S#state.foo);

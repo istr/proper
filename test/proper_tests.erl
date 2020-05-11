@@ -1,4 +1,7 @@
-%%% Copyright 2010-2013 Manolis Papadakis <manopapad@gmail.com>,
+%%% -*- coding: utf-8 -*-
+%%% -*- erlang-indent-level: 2 -*-
+%%% -------------------------------------------------------------------
+%%% Copyright 2010-2020 Manolis Papadakis <manopapad@gmail.com>,
 %%%                     Eirini Arvaniti <eirinibob@gmail.com>
 %%%                 and Kostis Sagonas <kostis@cs.ntua.gr>
 %%%
@@ -17,16 +20,17 @@
 %%% You should have received a copy of the GNU General Public License
 %%% along with PropEr.  If not, see <http://www.gnu.org/licenses/>.
 
-%%% @copyright 2010-2013 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
+%%% @copyright 2010-2020 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
 %%% @version {@version}
 %%% @author Manolis Papadakis
-%%% @doc This modules contains PropEr's Unit tests. You need the EUnit
+%%% @doc This module contains PropEr's Unit tests. You need the EUnit
 %%%      application to compile it.
 
 -module(proper_tests).
 
--include("proper.hrl").
+-compile([nowarn_untyped_record]).  % deliberately contains one untyped record
 
+-include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -spec test() -> any().
 
@@ -34,6 +38,10 @@
 -type dummy() :: dummy() | my_native_type() | type_and_fun() | type_only() 
     | id(_) | lof() | deeplist() | bin4() | bits42() | bits5x() | bits7x()
     | untyped().
+
+%% NOTE: Possibly here temporarily until the compiler's warnings are fixed.
+-export_type([my_native_type/0, type_and_fun/0, type_only/0, id/1, lof/0]).
+-export_type([bin4/0, bits42/0, bits5x/0, bits7x/0, untyped/0]).
 
 %%------------------------------------------------------------------------------
 %% Helper macros
@@ -95,51 +103,68 @@ assertEqualsOneOf(X, List) ->
 	?_fails(Test, [])).
 
 -define(_fails(Test, Opts),
-	?_failsWith(_, Test, Opts)).
+	?_assertFailRun(none, Test, Opts)).
 
 -define(_failsWith(ExpCExm, Test),
 	?_failsWith(ExpCExm, Test, [])).
 
 -define(_failsWith(ExpCExm, Test, Opts),
-	?_assertFailRun(ExpCExm, none, Test, Opts)).
+	?_assertFailRun(none, Test, Opts, ExpCExm)).
 
 -define(_failsWithOneOf(AllCExms, Test),
 	?_failsWithOneOf(AllCExms, Test, [])).
 
 -define(_failsWithOneOf(AllCExms, Test, Opts),
-	?_assertFailRun(_, AllCExms, Test, Opts)).
+	?_assertFailRun(AllCExms, Test, Opts)).
 
 -define(SHRINK_TEST_OPTS, [{start_size,10},{max_shrinks,10000}]).
 
 -define(_shrinksTo(ExpShrunk, Type),
-	?_assertFailRun([ExpShrunk], none, ?FORALL(_X,Type,false),
-			?SHRINK_TEST_OPTS)).
+	?_assertFailRun(none, ?FORALL(_X,Type,false),
+			?SHRINK_TEST_OPTS, [ExpShrunk])).
 
 -define(_shrinksToOneOf(AllShrunk, Type),
-	?_assertFailRun(_, [[X] || X <- AllShrunk], ?FORALL(_X,Type,false),
+	?_assertFailRun([[X] || X <- AllShrunk], ?FORALL(_X,Type,false),
 			?SHRINK_TEST_OPTS)).
 
 -define(_nativeShrinksTo(ExpShrunk, TypeStr),
-	?_assertFailRun([ExpShrunk], none,
+	?_assertFailRun(none,
 			?FORALL(_X,assert_can_translate(?MODULE,TypeStr),false),
-			?SHRINK_TEST_OPTS)).
+			?SHRINK_TEST_OPTS, [ExpShrunk])).
 
 -define(_nativeShrinksToOneOf(AllShrunk, TypeStr),
-	?_assertFailRun(_, [[X] || X <- AllShrunk],
+	?_assertFailRun([[X] || X <- AllShrunk],
 			?FORALL(_X,assert_can_translate(?MODULE,TypeStr),false),
 			?SHRINK_TEST_OPTS)).
 
--define(_assertFailRun(ExpCExm, AllCExms, Test, Opts),
+-define(_assertFailRun(AllCExms, Test, Opts),
 	?_test(begin
-	    ShortResult = proper:quickcheck(Test, Opts),
-	    CExm1 = get_cexm(),
-	    ?checkCExm(CExm1, ExpCExm, AllCExms, Test, Opts),
-	    ?assertEqual(false, ShortResult),
-	    LongResult = proper:quickcheck(Test, [long_result|Opts]),
-	    CExm2 = get_cexm(),
-	    ?checkCExm(CExm2, ExpCExm, AllCExms, Test, Opts),
-	    ?checkCExm(LongResult, ExpCExm, AllCExms, Test, Opts)
-	end)).
+		   ShortResult = proper:quickcheck(Test, Opts),
+		   CExm1 = get_cexm(),
+		   ?checkNoExpCExp(CExm1, AllCExms, Test, Opts),
+		   ?assertEqual(false, ShortResult),
+		   LongResult = proper:quickcheck(Test, [long_result|Opts]),
+		   CExm2 = get_cexm(),
+		   ?checkNoExpCExp(CExm2, AllCExms, Test, Opts),
+		   ?checkNoExpCExp(LongResult, AllCExms, Test, Opts)
+	       end)).
+-define(_assertFailRun(AllCExms, Test, Opts, ExpCExm),
+	?_test(begin
+		   ShortResult = proper:quickcheck(Test, Opts),
+		   CExm1 = get_cexm(),
+		   ?checkCExm(CExm1, AllCExms, Test, Opts, ExpCExm),
+		   ?assertEqual(false, ShortResult),
+		   LongResult = proper:quickcheck(Test, [long_result|Opts]),
+		   CExm2 = get_cexm(),
+		   ?checkCExm(CExm2, AllCExms, Test, Opts, ExpCExm),
+		   ?checkCExm(LongResult, AllCExms, Test, Opts, ExpCExm)
+	       end)).
+
+-define(_cexmMatchesWith(Pattern, Test),
+	?_test(begin
+		   ?assertEqual(false, proper:quickcheck(Test)),
+		   ?assertMatch(Pattern, get_cexm())
+	       end)).
 
 -spec get_cexm() -> any().
 get_cexm() ->
@@ -148,7 +173,16 @@ get_cexm() ->
     ?assert(state_is_clean()),
     CExm.
 
--define(checkCExm(CExm, ExpCExm, AllCExms, Test, Opts),
+%%
+%% The two macros below differ in that the first one we do not know the
+%% expected counterexample pattern, so there is no need to match against it.
+%%
+-define(checkNoExpCExp(CExm, AllCExms, Test, Opts),
+	begin
+	    ?assertCheck(false, CExm, Test, Opts),
+	    assertEqualsOneOf(CExm, AllCExms)
+	end).
+-define(checkCExm(CExm, AllCExms, Test, Opts, ExpCExm),
 	begin
 	    ?assertCheck(false, CExm, Test, Opts),
 	    ?assertMatch(ExpCExm, CExm),
@@ -160,12 +194,17 @@ get_cexm() ->
 
 -define(_assertTempBecomesN(N, ExpShortResult, Prop, Opts),
 	?_test(begin
-	    ?assertMatch(ExpShortResult, proper:quickcheck(Prop,Opts)),
-	    ?assertEqual(N, get_temp()),
-	    erase_temp(),
-	    proper:clean_garbage(),
-	    ?assert(state_is_clean())
-	end)).
+		   ?assertMatch(ExpShortResult, proper:quickcheck(Prop, Opts)),
+		   ?assertEqual(N, get_temp()),
+		   erase_temp(),
+		   proper:clean_garbage(),
+		   ?assert(state_is_clean())
+	       end)).
+%%
+%% Used when we are only interested in checking that a property fails.
+%%
+-define(_failsChk(Test, Opts),
+	?_assertEqual(false, proper:quickcheck(Test, Opts))).
 
 -spec inc_temp() -> ok.
 inc_temp() ->
@@ -220,7 +259,7 @@ setup_run_commands(Module, Cmds, Env) ->
     Res.
 
 %%------------------------------------------------------------------------------
-%% Helper Functions
+%% Helper functions
 %%------------------------------------------------------------------------------
 
 -spec assert_type_works({_,[any()],'' | aleaf | bleaf | false | good
@@ -268,7 +307,7 @@ assert_cant_translate(Mod, TypeStr) ->
     ?assert(state_is_clean()),
     ?assertMatch({error,_}, Result).
 
-%% TODO: after fixing the typesystem, use generic reverse function.
+%% TODO: after fixing the type system, use generic reverse function.
 -spec assert_is_instance(_,_) -> ok.
 assert_is_instance(X, Type) ->
     ?assert(proper_types:is_inst(X, Type) andalso state_is_clean()).
@@ -276,7 +315,7 @@ assert_is_instance(X, Type) ->
 -spec assert_can_generate(_,boolean()) -> ok.
 assert_can_generate(Type, CheckIsInstance) ->
     lists:foreach(fun(Size) -> try_generate(Type,Size,CheckIsInstance) end,
-		  [1,2,5,10,20,40,50]).
+		  [1, 2, 5, 10, 20, 40, 50]).
 
 -spec try_generate(_,_,boolean()) -> ok.
 try_generate(Type, Size, CheckIsInstance) ->
@@ -294,7 +333,7 @@ assert_seeded_runs_return_same_result(Type) ->
 
 -spec try_generate_seeded(_,_) -> ok.
 try_generate_seeded(Type, Size) ->
-    Seed = now(),
+    Seed = os:timestamp(),
     {ok, Instance1} = proper_gen:pick(Type, Size, Seed),
     {ok, Instance2} = proper_gen:pick(Type, Size, Seed),
     ?assert(Instance1 =:= Instance2).
@@ -391,6 +430,8 @@ simple_types_with_data() ->
       [skill,pain,pleasure], luck, [clear,20,50], none},
      {{integer(0,42),list(atom())}, [{42,[a,b]},{21,[c,de,f]},{0,[]}], {0,[]},
       [{-1,[a]},{12},{21,[b,c],12}], "{0..42,[atom()]}"},
+     {tuple(), [{a,42},{2.56,<<42>>,{a}},{},{a,{a,17},3.14,{{}}}], {},
+      [#{a => 17},[{}],42], "tuple()"},
      {tuple([atom(),integer()]), [{the,1}], {'',0}, [{"a",0.0}],
       "{atom(),integer()}"},
      {{}, [{}], {}, [[],{1,2}], "{}"},
@@ -414,6 +455,8 @@ simple_types_with_data() ->
      {number(), [12,32.3,-9,-77.7], 0, [manolis,papadakis], "number()"},
      {boolean(), [true,false], false, [unknown], "boolean()"},
      {string(), ["hello","","world"], "", ['hello'], "string()"},
+     {arity(), [0,2,17,42,255], 0, [-1,256], "arity()"},
+     {timeout(), [0,42,infinity,666], 0, [-1,infinite,3.14], "timeout()"},
      {?LAZY(integer()), [0,2,99], 0, [1.1], "integer()"},
      {?LAZY(list(float())), [[0.0,1.2,1.99],[]], [], [1.1,[1,2]], "[float()]"},
      {zerostream(10), [[0,0,0],[],[0,0,0,0,0,0,0]], [], [[1,0,0],[0.1]], none},
@@ -428,6 +471,8 @@ simple_types_with_data() ->
       none},
      {?SUCHTHATMAYBE(X,non_neg_integer(),X rem 4 =:= 1), [1,2,3,4,5,37,89], 0,
       [1.1,2.2,-12], "non_neg_integer()"},
+     {?SUCHTHAT(L, non_empty(list(non_neg_integer())), hd(L) < 5),
+      [[1], [1,2,3,4], [0,2]], [0], [[], "Fail","something", [5]], none},
      {any(), [1,-12,0,99.9,-42.2,0.0,an_atom,'',<<>>,<<1,2>>,<<1,2,3:5>>,[],
 	      [42,<<>>],{},{tag,12},{tag,[vals,12,12.2],[],<<>>}],
 	     0, [], "any()"},
@@ -500,7 +545,25 @@ constructed_types_with_data() ->
       null, [{'$to_part',null}], "k()"},
      {none, [{'$used',[null,null,{'$used',[null,null],{tag,null,[null]}}],
 	      {tag,null,[null,{tag,null,[null]}]}}, {'$to_part',null}],
-      null, [{'$used',[null],{tag,null,[]}}], "l()"}].
+      null, [{'$used',[null],{tag,null,[]}}], "l()"},
+     {utf8(), [{'$used',{'$used',0,[]},<<>>}, {'$used',{'$used',1,[0]},<<0>>},
+	       {'$used',{'$used',1,[127]},<<127>>},
+	       {'$used',{'$used',1,[353]},<<197,161>>}],
+      <<>>, [{'$used',{'$used',1,[128]},<<128>>}], none},
+     {utf8(0), [{'$used',{'$used',0,[]},<<>>}], <<>>, [], none},
+     {utf8(1), [{'$used',{'$used',0,[]},<<>>},
+		{'$used',{'$used',1,[127]},<<127>>},
+		{'$used',{'$used',1,[353]},<<197,161>>}], <<>>, [], none},
+     {utf8(2), [{'$used',{'$used',1,[353]},<<197,161>>},
+		{'$used',{'$used',2,[127,353]},<<127,197,161>>}],
+      <<>>, [], none},
+     {utf8(inf, 1), [{'$used',{'$used',0,[]},<<>>},
+		     {'$used',{'$used',1,[0]},<<0>>},
+		     {'$used',{'$used',2,[0,0]},<<0,0>>},
+		     {'$used',{'$used',3,[0,0,0]},<<0,0,0>>}], <<>>, [], none},
+     {utf8(inf, 2), [{'$used',{'$used',3,[0,0,0]},<<0,0,0>>},
+		     {'$used',{'$used',1,[353]},<<197,161>>}],
+      <<>>, [], none}].
 
 -spec function_types() -> [{_,[1..255,...]},...].
 function_types() ->
@@ -529,7 +592,24 @@ impossible_types() ->
      ?SUCHTHAT(X, float(0.0,10.0), X < 0.0),
      ?SUCHTHAT(L, vector(12,integer()), length(L) =/= 12),
      ?SUCHTHAT(B, binary(), lists:member(256,binary_to_list(B))),
-     ?SUCHTHAT(X, exactly('Lelouch'), X =:= 'vi Brittania')].
+     ?SUCHTHAT(X, exactly('Lelouch'), X =:= 'vi Brittania'),
+     ?SUCHTHAT(X, utf8(), unicode:characters_to_list(X) =:= [16#D800]),
+     ?SUCHTHAT(X, utf8(1, 1), size(X) > 1),
+     %% Nested constraints, of which the inner one fails
+     ?SUCHTHAT(X, ?SUCHTHAT(Y, pos_integer(), Y < 0), X > 0),
+     %% Nested constraints, of which the outer one fails
+     ?SUCHTHAT(X, ?SUCHTHAT(Y, pos_integer(), Y > 0), X < 0),
+     %% Nested constraints, one strict and one non-strict, where the
+     %% inner one fails
+     ?SUCHTHATMAYBE(_X, ?SUCHTHAT(Y, pos_integer(), Y < 0), true),
+     %% Nested constraints, one strict and one non-strict, where the
+     %% outer one fails
+     ?SUCHTHAT(X, ?SUCHTHATMAYBE(Y, pos_integer(), Y < 0), X < 0),
+     %% Two failing constraints within a ?LET macro, where both
+     %% constraints are used as a 'raw type'
+     ?LET({X,Y}, {?SUCHTHAT(X1, pos_integer(), X1 < 0),
+		  ?SUCHTHAT(Y1, pos_integer(), Y1 < 0)}, {X,Y})
+    ].
 
 -spec impossible_native_types() ->
     [{types_test1,[[any(),...],...]} | {types_test2,[[any(),...],...]},...].
@@ -593,9 +673,10 @@ combinations() ->
       [{1,[6,8,9]}, {2,[1,3,5]}, {3,[2,4,7]}]}].
 
 -spec first_comb() -> [{10 | 11 | 12,3 | 5,2 | 3 | 4,[{_,_},...]},...].
-first_comb() -> [{10,3,3,[{1,[7,8,9,10]}, {2,[4,5,6]}, {3,[1,2,3]}]},
-		 {11,5,2,[{1,[6,7,8,9,10,11]}, {2,[1,2,3,4,5]}]},
-		 {12,3,4,[{1,[10,11,12]}, {2,[7,8,9]}, {3,[4,5,6]}, {4,[1,2,3]}]}].
+first_comb() ->
+    [{10,3,3,[{1,[7,8,9,10]}, {2,[4,5,6]}, {3,[1,2,3]}]},
+     {11,5,2,[{1,[6,7,8,9,10,11]}, {2,[1,2,3,4,5]}]},
+     {12,3,4,[{1,[10,11,12]}, {2,[7,8,9]}, {3,[4,5,6]}, {4,[1,2,3]}]}].
 
 -spec lists_to_zip() -> [{[a | b | c | d | 1 | 2 | 3 | 42],
     [atom | dummy | integer()],[{_,_}]},...].
@@ -747,7 +828,6 @@ dollar_data() ->
 %% TODO: spec_timeout option
 %% TODO: defined option precedence
 %% TODO: conversion of maybe_improper_list
-%% TODO: use demo_is_instance and demo_translate_type
 %% TODO: debug option to output tests passed, fail reason, etc.
 %% TODO: test expected distribution of random functions
 
@@ -764,21 +844,58 @@ constructed_types_test_() ->
 %%	 (start from valid Xs)
 -spec shrinks_to_test_() -> [{685,fun(() -> any())}].
 shrinks_to_test_() ->
+    All = simple_types_with_data() ++ constructed_types_with_data(),
     [?_shrinksTo(Target, Type)
-     || {Type,_Xs,Target,_Ys,_TypeStr} <- simple_types_with_data()
-					  ++ constructed_types_with_data(),
-	Type =/= none].
+     || {Type,_Xs,Target,_Ys,_TypeStr} <- All, Type =/= none].
 
 -spec native_shrinks_to_test_() -> [{691,fun(() -> any())}].
 native_shrinks_to_test_() ->
+    All = simple_types_with_data() ++ constructed_types_with_data(),
     [?_nativeShrinksTo(Target, TypeStr)
-     || {_Type,_Xs,Target,_Ys,TypeStr} <- simple_types_with_data()
-					  ++ constructed_types_with_data(),
-	TypeStr =/= none].
+     || {_Type,_Xs,Target,_Ys,TypeStr} <- All, TypeStr =/= none].
 
 -spec cant_generate_test_() -> [{697,fun(() -> any())}].
 cant_generate_test_() ->
     [?_test(assert_cant_generate(Type)) || Type <- impossible_types()].
+
+-spec native_cant_translate_test_() -> [{700,fun(() -> any())}].
+proper_exported_types_test_() ->
+    [?_assertEqual({[],12}, proper_exported_types_test:not_handled())].
+
+%%------------------------------------------------------------------------------
+%% Verify that failing constraints are correctly reported
+%%------------------------------------------------------------------------------
+
+cant_generate_constraints_test_() ->
+  [%% An impossible generator specified in the same function
+   ?_errorsOut({cant_generate, [{?MODULE, cant_generate_constraints_test_, 0}]},
+               ?FORALL(_, ?SUCHTHAT(X, pos_integer(), X =< 0), true)),
+   %% An impossible generator specified in a separate function
+   ?_errorsOut({cant_generate, [{?MODULE, impossible, 0}]},
+               ?FORALL(_X, impossible(), true)),
+   %% An impossible generator in presence of multiple constraints
+   ?_errorsOut({cant_generate, [{?MODULE, possible, 0},
+				{?MODULE, possible_made_impossible, 0}]},
+               ?FORALL(_X, possible_made_impossible(), true)),
+   %% An impossible generator in presence of multiple, duplicated constraints
+   ?_errorsOut({cant_generate, [{?MODULE, possible, 0},
+				{?MODULE, possible_made_impossible_2, 0}]},
+               ?FORALL(_X, possible_made_impossible_2(), true))
+  ].
+
+possible() ->
+  ?SUCHTHAT(X, pos_integer(), X > 0).
+
+impossible() ->
+  ?SUCHTHAT(X, pos_integer(), X =< 0).
+
+possible_made_impossible() ->
+  ?SUCHTHAT(X, possible(), X =< 0).
+
+possible_made_impossible_2() ->
+  ?SUCHTHAT(Y, ?SUCHTHAT(X, possible(), X =< 0), Y =< 0).
+
+%%------------------------------------------------------------------------------
 
 -spec native_cant_translate_test_() -> [{700,fun(() -> any())}].
 native_cant_translate_test_() ->
@@ -812,7 +929,8 @@ parse_transform_test_() ->
     [?_passes(auto_export_test1:prop_1()),
      ?_assertError(undef, auto_export_test2:prop_1()),
      ?_assertError(undef, no_native_parse_test:prop_1()),
-     ?_assertError(undef, no_out_of_forall_test:prop_1())].
+     ?_passes(let_tests:prop_1()),
+     ?_failsWith([3*42], let_tests:prop_2())].
 
 -spec native_type_props_test_() -> [{1..1114111,fun(() -> any())}
     | {setup,fun(() -> any()),fun((_) -> any()),{_,_}},...].
@@ -865,8 +983,45 @@ native_type_props_test_() ->
      ?_passes(?FORALL(X, ?LET(L,lof(),lists:min([99999.9|L])),
 		      is_float(X))),
      ?_shrinksTo(0, ?LETSHRINK([X],[my_native_type()],{'tag',X})),
+     {"Shrinking tuples",
+      [{"All elements are generators",
+        [?_shrinksTo({0,0}, proper_types:tuple([proper_types:integer(), proper_types:integer()])),
+         ?_shrinksTo({0,0}, {proper_types:integer(), proper_types:integer()})]},
+       {"Some elements are generators",
+        [?_shrinksTo({0,0}, proper_types:tuple([proper_types:integer(), 0])),
+         ?_shrinksTo({0,2}, proper_types:tuple([proper_types:integer(), 2])),
+         ?_shrinksTo({0,0}, {proper_types:integer(), 0}),
+         ?_shrinksTo({0,2}, {proper_types:integer(), 2})]},
+       {"All elements are consts",
+         [?_shrinksTo({3,2}, proper_types:tuple([3, 2])),
+          ?_shrinksTo({3,2}, {3, 2})]}]},
+     {"Shrinking fixed lists",
+      [{"All elements are generators",
+        [?_shrinksTo([0,0], proper_types:fixed_list([proper_types:integer(), proper_types:integer()])),
+         ?_shrinksTo([0,0], [proper_types:integer(), proper_types:integer()]),
+         ?_shrinksTo([0|0], [proper_types:integer()|proper_types:integer()])]},
+       {"Some elements are generators",
+        [?_shrinksTo([0,0], proper_types:fixed_list([proper_types:integer(), 0])),
+         ?_shrinksTo([0,2], proper_types:fixed_list([proper_types:integer(), 2])),
+         ?_shrinksTo([0|2], proper_types:fixed_list([proper_types:integer()|2])),
+         ?_shrinksTo([0,0], [proper_types:integer(), 0]),
+         ?_shrinksTo([0,2], [proper_types:integer(), 2]),
+         ?_shrinksTo([12,42], [12,42|list(integer())])]},
+       {"All elements are consts",
+         [?_shrinksTo([3|2], proper_types:fixed_list([3|2])),
+          ?_shrinksTo([3,2], proper_types:fixed_list([3, 2])),
+          ?_shrinksTo([3,2], [3, 2])]}]},
      ?_passes(weird_types:prop_export_all_works()),
-     ?_passes(weird_types:prop_no_auto_import_works())].
+     ?_passes(weird_types:prop_no_auto_import_works()),
+
+     ?_passes(?FORALL(B, utf8(), unicode:characters_to_binary(B) =:= B)),
+     ?_passes(?FORALL(B, utf8(1), length(unicode:characters_to_list(B)) =< 1)),
+     ?_passes(?FORALL(B, utf8(1, 1), size(B) =< 1)),
+     ?_passes(?FORALL(B, utf8(2, 1), size(B) =< 2)),
+     ?_passes(?FORALL(B, utf8(4), size(B) =< 16)),
+     ?_passes(?FORALL(B, utf8(),
+                      length(unicode:characters_to_list(B)) =< size(B)))
+    ].
 
 -type bin4()   :: <<_:32>>.
 -type bits42() :: <<_:42>>.
@@ -908,6 +1063,16 @@ true_props_test_() ->
 			  ?FORALL(X, ?SIZED(Size,Size),
 				  begin inc_temp(X),true end),
 			  [{numtests,3},{start_size,4},{max_size,4}]),
+     ?_assertTempBecomesN(30, true,
+                          ?FORALL_TARGETED(X, ?USERNF(?SIZED(Size,Size),
+                                                      fun (_, _) -> ?SIZED(Size, Size) end),
+                                           begin inc_temp(X),true end),
+                          [{numtests,12},{max_size,4}]),
+     ?_assertTempBecomesN(12, true,
+                          ?FORALL_TARGETED(X, ?USERNF(?SIZED(Size,Size),
+                                                      fun (_, _) -> ?SIZED(Size, Size) end),
+                                           begin inc_temp(X),true end),
+                          [{numtests,3},{start_size,4},{max_size,4}]),
      ?_passes(?FORALL(X, integer(), ?IMPLIES(abs(X) > 1, X * X > X))),
      ?_passes(?FORALL(X, integer(), ?IMPLIES(X >= 0, true))),
      ?_passes(?FORALL({X,Lim}, {int(),?SIZED(Size,Size)}, abs(X) =< Lim)),
@@ -919,12 +1084,18 @@ true_props_test_() ->
 		  {three, conjunction([{a,true},{b,true}])}
 	      ])),
      ?_passes(?FORALL(X, untyped(), is_record(X, untyped))),
-     ?_passes(pdict_statem:prop_pdict()),
+     ?_passes(fun_tests:prop_fun_bool())].
+
+true_stateful_test_() ->
+    [?_passes(improper_lists_statem:prop_simple()),
      ?_passes(symb_statem:prop_simple()),
+     ?_passes(symb_statem_maps:prop_simple()),
+     ?_passes(more_commands_test:prop_commands_passes(), [{numtests,42}]),
+     {timeout, 10, ?_passes(ets_statem_test:prop_ets())},
+     {timeout, 20, ?_passes(ets_statem_test:prop_parallel_ets())},
+     {timeout, 20, ?_passes(pdict_fsm:prop_pdict())},
      {timeout, 20, ?_passes(symb_statem:prop_parallel_simple())},
-     {timeout, 10, ?_passes(ets_statem:prop_ets())},
-     {timeout, 20, ?_passes(ets_statem:prop_parallel_ets())},
-     {timeout, 20, ?_passes(pdict_fsm:prop_pdict())}].
+     {timeout, 20, ?_passes(symb_statem_maps:prop_parallel_simple())}].
 
 -spec false_props_test_() -> [{1..1114111,fun(() -> any())} 
     | {timeout,20,{_,_}},...].
@@ -950,7 +1121,9 @@ false_props_test_() ->
 					true  -> erlang:exit(you_got_it);
 					false -> true
 				    end)),
-     %%TODO: check why the following emits a clause warning
+     %% TODO: Check that the following two tests shrink properly on _N
+     ?_cexmMatchesWith([{_,_N}], fun_tests:prop_fun_int_int()),
+     ?_cexmMatchesWith([{_,_,[_N]}], fun_tests:prop_lists_map_filter()),
      ?_fails(?FORALL(_, integer(), ?TIMEOUT(100,timer:sleep(150) =:= ok))),
      ?_failsWith([20], ?FORALL(X, pos_integer(), ?TRAPEXIT(creator(X) =:= ok))),
      ?_assertTempBecomesN(7, false,
@@ -961,7 +1134,7 @@ false_props_test_() ->
      %% and one when the minimal input is rechecked
      ?_assertTempBecomesN(2, false,
 			  ?FORALL(L, list(atom()),
-				  ?WHENFAIL(inc_temp(),length(L) < 5))),
+				  ?WHENFAIL(inc_temp(), length(L) < 5))),
      ?_assertTempBecomesN(3, false,
 			  ?FORALL(S, ?SIZED(Size,Size),
 				  begin inc_temp(), S =< 20 end),
@@ -1012,17 +1185,25 @@ false_props_test_() ->
 		      ])},
 		     {stupid, ?FORALL(_, pos_integer(), throw(woot))}
 		 ]))),
+     ?_failsWith([[a,a,a,a,a]], shrinking_gotchas:prop_shrink_list_same_elem()),
+     ?_fails(more_commands_test:prop_more_commands_fails(), [{numtests,42}]),
+     ?_failsWith([500], targeted_shrinking_test:prop_int()),
+     ?_failsWith([500], targeted_shrinking_test:prop_let_int()),
+     ?_failsWith([500], targeted_shrinking_test:prop_int_shrink_outer()),
+     ?_failsWith([500], targeted_shrinking_test:prop_int_shrink_inner()),
      %%TODO: check why the following emits a clause warning
      {timeout, 20, ?_fails(ets_counter:prop_ets_counter())},
      %%TODO: check why the following emits a clause warning
-     ?_fails(post_false:prop_simple()),
+     ?_fails(post_false:prop_simple())].
+
+exception_props_test_() ->
      %%TODO: check why the following emits a clause warning
-     ?_fails(error_statem:prop_simple())].
+     [?_fails(error_statem:prop_simple())].
 
 -spec error_props_test_() -> [{916 | 918 | 920 | 922 | 924 | 926 
     | 927 | 928 | 929 | 932 | 936 | 940,fun(() -> any())},...].
 error_props_test_() ->
-    [?_errorsOut(cant_generate,
+    [?_errorsOut({cant_generate,[{?MODULE,error_props_test_,0}]},
 		 ?FORALL(_, ?SUCHTHAT(X, pos_integer(), X =< 0), true)),
      ?_errorsOut(cant_satisfy,
 		 ?FORALL(X, pos_integer(), ?IMPLIES(X =< 0, true))),
@@ -1032,8 +1213,10 @@ error_props_test_() ->
 		   ?FORALL(X, integer(), ?IMPLIES(X > 5, X < 6))),
      ?_assertCheck({error,too_many_instances}, [1,ab],
 		   ?FORALL(X, pos_integer(), X < 0)),
-     ?_errorsOut(cant_generate, prec_false:prop_simple()),
-     ?_errorsOut(cant_generate, nogen_statem:prop_simple()),
+     ?_errorsOut({cant_generate,[{proper_statem,commands,4}]},
+		 prec_false:prop_simple()),
+     ?_errorsOut({cant_generate,[{nogen_statem,impossible_arg,0}]},
+		 nogen_statem:prop_simple()),
      ?_errorsOut(non_boolean_result, ?FORALL(_, integer(), not_a_boolean)),
      ?_errorsOut(non_boolean_result,
 		 ?FORALL(_, ?SHRINK(42,[0]),
@@ -1068,12 +1251,17 @@ not_defined_test_() ->
 -spec options_test_() -> [{957 | 960 | 963 | 964 | 965 | 966 | 969,
     fun(() -> any())},...].
 options_test_() ->
-    [?_assertTempBecomesN(300, true,
+    [?_assertEqual({error,{erroneous_option,{numtests,0}}},
+		   proper:module(command_props, [{numtests,0}])),
+     ?_assertEqual({error,{unrecognized_option,gazonk}},
+		   proper:quickcheck(rec_props_test1:prop_1(), [42,gazonk])),
+     ?_assertTempBecomesN(300, true,
 			  ?FORALL(_, 1, begin inc_temp(), true end),
 			  [{numtests,300}]),
      ?_assertTempBecomesN(300, true,
 			  ?FORALL(_, 1, begin inc_temp(), true end),
 			  [300]),
+<<<<<<< HEAD
      ?_failsWith([42], ?FORALL(_,?SHRINK(42,[0,1]),false), [noshrink]),
      ?_failsWith([42], ?FORALL(_,?SHRINK(42,[0,1]),false), [{max_shrinks,0}]),
      %%TODO: check why the following emits a clause warning
@@ -1081,10 +1269,23 @@ options_test_() ->
      ?_assertRun({error,cant_generate},
 		 ?FORALL(_,?SUCHTHAT(X,pos_integer(),X > 0),true),
 		 [{constraint_tries,0}], true),
+=======
+     ?_failsWith([42], ?FORALL(T, any(), T < 42),
+		 [any_to_integer,verbose,nocolors]),
+     ?_failsWith([42], ?FORALL(I, integer(), I < 42),
+		 [{numtests,4711}, {on_output,fun print_in_magenta/2}]),
+     ?_failsWith([42], ?FORALL(_, ?SHRINK(42,[0,1]), false), [noshrink]),
+     ?_failsWith([42], ?FORALL(_, ?SHRINK(42,[0,1]), false), [{max_shrinks,0}]),
+     ?_fails(?FORALL(_, integer(), false), [fails]),
+     ?_assertRun({error,{cant_generate,[{?MODULE,options_test_,0}]}},
+		 ?FORALL(_, ?SUCHTHAT(X, pos_integer(), X > 42), true),
+		 [{constraint_tries,1}], true),
+>>>>>>> upstream/master
      ?_failsWith([12],
-		 ?FORALL(_,?SIZED(Size,integer(Size,Size)),false),
+		 ?FORALL(_, ?SIZED(Size, integer(Size, Size)), false),
 		 [{start_size,12}])].
 
+<<<<<<< HEAD
 -spec adts_test_() -> [{977 | 980,fun(() -> any())} 
     | {timeout,20,{_,_}},...].
 adts_test_() ->
@@ -1098,17 +1299,107 @@ adts_test_() ->
      ?_fails(?FORALL({X,D},
 	     {boolean(),dict(boolean(),integer())},
 	     dict:erase(X, dict:store(X,42,D)) =:= D))].
+=======
+print_in_magenta(S, L) ->
+   io:format("\033[1;35m"++S++"\033[0m", L).
+
+setup_prop() ->
+    ?SETUP(fun () ->
+		   put(setup_token, true),
+		   fun () ->
+			   erase(setup_token),
+			   ok
+		   end
+	   end,
+	   ?FORALL(_, exactly(ok), get(setup_token))).
+
+failing_setup_prop() ->
+    ?SETUP(fun () ->
+		   put(setup_token, true),
+		   fun () ->
+			   erase(setup_token),
+			   ok
+		   end
+	   end,
+	   ?FORALL(_, exactly(ok), not get(setup_token))).
+
+double_setup_prop() ->
+    ?SETUP(fun () ->
+		   put(setup_token2, true),
+		   fun () ->
+			   erase(setup_token2),
+			   ok
+		   end
+	   end,
+	   ?SETUP(fun () ->
+			  put(setup_token, true),
+			  fun () ->
+				  erase(setup_token),
+				  ok
+			  end
+		  end,
+		  ?FORALL(_, exactly(ok),
+			  get(setup_token) andalso get(setup_token2)))).
+
+setup_test_() ->
+    [?_passes(setup_prop(), [10]),
+     ?_assert(proper:quickcheck(setup_prop(), 10)
+	      andalso undefined =:= get(setup_token)),
+     ?_fails(failing_setup_prop(), [10]),
+     ?_assert(not proper:quickcheck(failing_setup_prop(), [10, noshrink, quiet])
+	      andalso undefined =:= get(setup_token)),
+     ?_assert(proper:check(setup_prop(), [ok], 10)),
+     ?_assert(proper:check(setup_prop(), [ok], 10)
+	      andalso undefined =:= get(setup_token)),
+     ?_assert(not proper:check(failing_setup_prop(), [ok], 10)),
+     ?_assert(not proper:check(failing_setup_prop(), [ok], 10)
+	      andalso undefined =:= get(setup_token)),
+     ?_passes(double_setup_prop(), [10]),
+     ?_assert(proper:quickcheck(double_setup_prop(), 10)
+	      andalso undefined =:= get(setup_token)
+	      andalso undefined =:= get(setup_token2)),
+     ?_assert(proper:check(double_setup_prop(), [ok], 10)),
+     ?_assert(true = proper:check(double_setup_prop(), [ok], 10)
+	      andalso undefined =:= get(setup_token)
+	      andalso undefined =:= get(setup_token2))].
+
+adts1_test_() ->
+    {timeout, 60,	% for Kostis' old laptop
+      ?_passes(?FORALL({X,S},{integer(),sets:set(integer())},
+		       sets:is_element(X,sets:add_element(X,S))), [20])}.
+
+adts2_test_() ->
+    {timeout, 60,	% for 18.x (and onwards?)
+     ?_passes(?FORALL({X,Y,D},
+		      {integer(),float(),dict:dict(integer(),float())},
+		      dict:fetch(X,dict:store(X,Y,eval(D))) =:= Y), [30])}.
+
+adts3_test_() ->
+     {timeout, 60,
+      ?_fails(?FORALL({X,D},
+	      {boolean(),dict:dict(boolean(),integer())},
+	      dict:erase(X, dict:store(X,42,D)) =:= D))}.
+>>>>>>> upstream/master
 
 -spec parameter_test_() -> {985,fun(() -> ok)}.
 parameter_test_() ->
     ?_passes(?FORALL(List, [zero1(),zero2(),zero3(),zero4()],
 		     begin
-			 [?assertMatch(undefined, proper_types:parameter(P))
+			 [?assertEqual(undefined, proper_types:parameter(P))
 			  || P <- [x1,x2,y2,x3,y3,x4,y4,v,w,z]],
 			 lists:all(fun is_zero/1, List)
 		     end)).
 
+<<<<<<< HEAD
 -spec zip_test_() -> [{993,fun(() -> any())}].
+=======
+parameter_targeted_test_() ->
+  BaseType = ?LAZY(proper_types:parameter(param)),
+  UserNF = ?USERNF(BaseType, fun (_, _) -> BaseType end),
+  Type = proper_types:with_parameter(param, 1, UserNF),
+  ?_passes(?FORALL_TARGETED(X, Type, X =:= 1)).
+
+>>>>>>> upstream/master
 zip_test_() ->
     [?_assertEqual(proper_statem:zip(X, Y), Expected)
      || {X,Y,Expected} <- lists_to_zip()].
@@ -1118,7 +1409,26 @@ command_names_test_() ->
     [?_assertEqual(proper_statem:command_names(Cmds), Expected)
      || {Cmds,Expected} <- command_names()].
 
+<<<<<<< HEAD
 -spec valid_cmds_test_() -> [{1001,fun(() -> any())}].
+=======
+command_names_parallel1_test_() ->
+    [?_assertEqual(proper_statem:command_names({Cmds,[]}), Expected)
+     || {Cmds,Expected} <- command_names()].
+
+command_names_parallel2_test_() ->
+    [?_assertEqual(proper_statem:command_names({[],[Cmds]}), Expected)
+     || {Cmds,Expected} <- command_names()].
+
+command_names_parallel3_test_() ->
+    [?_assertEqual(proper_statem:command_names({Cmds,[Cmds]}), Expected++Expected)
+     || {Cmds,Expected} <- command_names()].
+
+command_names_parallel4_test_() ->
+    [?_assertEqual(proper_statem:command_names({Cmds,[Cmds,Cmds]}), Expected++Expected++Expected)
+     || {Cmds,Expected} <- command_names()].
+
+>>>>>>> upstream/master
 valid_cmds_test_() ->
     [?_assert(proper_statem:is_valid(Mod, State, Cmds, Env))
      || {Mod,State,Cmds,_,_,Env} <- valid_command_sequences()].
@@ -1167,13 +1477,14 @@ can_generate_parallel_commands1_test_() ->
 -spec seeded_runs_return_same_result_test_() -> [{1039,fun(() -> any())}].
 seeded_runs_return_same_result_test_() ->
     [?_test(assert_seeded_runs_return_same_result(proper_statem:commands(Mod)))
-      || Mod <- [pdict_statem]].
+     || Mod <- [pdict_statem]].
 
 -spec run_valid_commands_test_() -> [{1043,fun(() -> any())}].
 run_valid_commands_test_() ->
     [?_assertMatch({_H,DynState,ok}, setup_run_commands(Mod, Cmds, Env))
      || {Mod,_,Cmds,_,DynState,Env} <- valid_command_sequences()].
 
+<<<<<<< HEAD
 -spec run_invalid_precondition_test_() -> [{1047,fun(() -> any())}].
 run_invalid_precondition_test_() ->
      [?_assertMatch({_H,_S,{precondition,false}},
@@ -1181,11 +1492,14 @@ run_invalid_precondition_test_() ->
       || {Mod,Cmds,Env,_Shrunk} <- invalid_precondition()].
 
 -spec run_init_error_test_() -> [{1052,fun(() -> any())}].
+=======
+>>>>>>> upstream/master
 run_init_error_test_() ->
     [?_assertMatch({_H,_S,initialization_error},
 		   setup_run_commands(Mod, Cmds, Env))
      || {Mod,Cmds,Env,_Shrunk} <- symbolic_init_invalid_sequences()].
 
+<<<<<<< HEAD
 -spec run_postcondition_false_test() -> {1057,fun(() -> ok)}.
 run_postcondition_false_test() ->
     ?_assertMatch({_H,_S,{postcondition,false}},
@@ -1196,6 +1510,30 @@ run_exception_test() ->
     ?_assertMatch(
        {_H,_S,{exception,throw,badarg,_}},
        run_commands(post_false, proper_statem:commands(error_statem))).
+=======
+run_precondition_false_test_() ->
+    [?_assertMatch({_H,_S,{precondition,false}},
+		   setup_run_commands(Mod, Cmds, Env))
+     || {Mod,Cmds,Env,_Shrunk} <- invalid_precondition()].
+
+run_postcondition_false_test_() ->
+    Mod = post_false,
+    Cmds = [{set,{var,1},{call,Mod,foo,[]}},
+	    {set,{var,2},{call,Mod,bar,[]}},
+	    {set,{var,3},{call,Mod,foo,[]}},
+	    {set,{var,4},{call,Mod,bar,[]}},
+	    {set,{var,5},{call,Mod,bar,[]}},
+	    {set,{var,6},{call,Mod,foo,[]}}],
+    State = {state,5}, PostF = {postcondition,false},
+    [?_assertMatch({_H1,State,PostF}, run_commands(Mod, Cmds))].
+
+run_statem_exceptions_test_() ->
+    Mod = error_statem,
+    Cmds = [{set,{var,1},{call,Mod,foo,[42]}}],
+    State = {state,0},
+    [?_assertMatch({_H,State,{exception,throw,badarg,_}},
+		   run_commands(Mod, Cmds))].
+>>>>>>> upstream/master
 
 -spec get_next_test_() -> [{1066,fun(() -> any())}].
 get_next_test_() ->
@@ -1205,17 +1543,17 @@ get_next_test_() ->
 
 -spec mk_first_comb_test_() -> [{1071,fun(() -> any())}].
 mk_first_comb_test_() ->
-     [?_assertEqual(Expected, proper_statem:mk_first_comb(N, Len, W))
-      || {N, Len, W, Expected} <- first_comb()].
+    [?_assertEqual(Expected, proper_statem:mk_first_comb(N, Len, W))
+     || {N, Len, W, Expected} <- first_comb()].
 
 -spec args_not_defined_test() -> [{1075,fun(() -> any())}].
 args_not_defined_test() ->
     [?_assertNot(proper_statem:args_defined(Args, SymbEnv))
-     || {Args,SymbEnv} <- arguments_not_defined()].
+     || {Args, SymbEnv} <- arguments_not_defined()].
 
 -spec command_props_test_() -> {timeout,150,[{_,_},...]}.
 command_props_test_() ->
-    {timeout, 150, [?_assertEqual([], proper:module(command_props, 50))]}.
+    {timeout, 150, [?_assertEqual([], proper:module(command_props))]}.
 
 %% TODO: is_instance check fails because of ?LET in fsm_commands/1?
 -spec can_generate_fsm_commands_test_() -> [{1083,fun(() -> any())}].
@@ -1235,6 +1573,17 @@ dollar_only_cp_test_() ->
 	     is_atom(K),
 	     re:run(atom_to_list(K), ["^[$]"], [{capture,none}]) =:= match]).
 
+sampleshrink_test_() ->
+    Gen = non_empty(?LET({N,Lst}, {range(0,5),list(a)}, lists:sublist(Lst, N))),
+    [{"Test type with restrain",
+      [{"Try another way to call shrinking (not sampleshrink)",
+        ?_shrinksTo([a], Gen)},
+       ?_test(proper_gen:sampleshrink(Gen))]}].
+
+examples_are_ok_test_() ->
+  [{timeout, 42, ?_assertEqual([], proper:module(M))}
+   || M <- [b64,elevator_fsm,ets_statem,mastermind,pdict_statem,stack]].
+
 
 %%------------------------------------------------------------------------------
 %% Performance tests
@@ -1242,7 +1591,7 @@ dollar_only_cp_test_() ->
 
 -spec max_size_test() -> ok.
 max_size_test() ->
-    %% issue a call to load the test module and ensure the test exists
+    %% issue a call to load the test module and ensure that the test exists
     ?assert(lists:member({prop_identity,0},
 			 perf_max_size:module_info(exports))),
     %% run some tests with a small and a big max_size option
@@ -1258,7 +1607,7 @@ max_size_test_aux(Size) ->
 
 
 %%------------------------------------------------------------------------------
-%% Helper Predicates
+%% Helper predicates
 %%------------------------------------------------------------------------------
 
 -spec no_duplicates([any()]) -> boolean().
@@ -1313,7 +1662,7 @@ equal_ignoring_chars([Char1|Rest1] = Str1, [Char2|Rest2] = Str2, Ignore) ->
 
 -spec smaller_lengths_than_my_own([any()]) -> [integer()].
 smaller_lengths_than_my_own(L) ->
-    lists:seq(0,length(L)).
+    lists:seq(0, length(L)).
 
 -spec is_zero(_) -> boolean().
 is_zero(X) -> X =:= 0.
@@ -1331,9 +1680,9 @@ partition(Pivot, List) ->
 partition_tr(_Pivot, [], Lower, Higher) ->
     {Lower, Higher};
 partition_tr(Pivot, [H|T], Lower, Higher) ->
-    if
-	H =< Pivot -> partition_tr(Pivot, T, [H|Lower], Higher);
-	H > Pivot  -> partition_tr(Pivot, T, Lower, [H|Higher])
+    case H =< Pivot of
+	true  -> partition_tr(Pivot, T, [H|Lower], Higher);
+	false -> partition_tr(Pivot, T, Lower, [H|Higher])
     end.
 
 -spec quicksort([any()]) -> [any()].
@@ -1352,9 +1701,9 @@ creator(X) ->
 
 -spec destroyer(_,pid()) -> not_yet.
 destroyer(X, Father) ->
-    if
-	X < 20 -> Father ! not_yet;
-	true   -> exit(this_is_the_end)
+    case X < 20 of
+	true  -> Father ! not_yet;
+	false -> exit(this_is_the_end)
     end.
 
 

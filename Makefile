@@ -1,4 +1,4 @@
-# Copyright 2010-2013 Manolis Papadakis <manopapad@gmail.com>,
+# Copyright 2010-2020 Manolis Papadakis <manopapad@gmail.com>,
 #                     Eirini Arvaniti <eirinibob@gmail.com>
 #                 and Kostis Sagonas <kostis@cs.ntua.gr>
 #
@@ -17,78 +17,63 @@
 # You should have received a copy of the GNU General Public License
 # along with PropEr.  If not, see <http://www.gnu.org/licenses/>.
 
-# Author(s):   Manolis Papadakis, Kostis Sagonas
+# Author(s):   Manolis Papadakis and Kostis Sagonas
 # Description: Instructions for make
 
-ERL = $(shell which erl)
-ifeq ($(ERL),)
-$(error "Erlang not available on this system")
-endif
- 
-REBAR=$(shell which rebar || ./rebar)
-ifeq ($(REBAR),)
-$(error "Rebar not available on this system")
+.PHONY: default all compile dialyzer check_escripts test doc clean distclean rebuild retest
+
+ifneq (,$(findstring Windows,$(OS)))
+    SEP := $(strip \)
+else
+    SEP := $(strip /)
 endif
 
-DIALYZER_FLAGS=$(shell ./dialyzer_flags.sh)
+REBAR3_URL := https://s3.amazonaws.com/rebar3/rebar3
+REBAR3 ?= $(shell which rebar3 || which .$(SEP)rebar3 || \
+            (wget $(REBAR3_URL) && chmod +x rebar3 && echo .$(SEP)rebar3))
+COVER ?= false
 
-.PHONY: fast all get-deps compile run-dialyzer check-escripts tests doc clean distclean rebuild retest
+default: compile
 
-default: fast .dialyzer.plt dialyzer
-
-fast: get-deps compile
-
-all: default doc tests
-
-include/compile_flags.hrl:
-	./write_compile_flags $@
-
-get-deps:
-	@$(REBAR) get-deps
+all: compile dialyzer doc test
 
 compile:
-	@$(REBAR) compile
+	$(RM) ebin
+	$(REBAR3) compile
+	ln -s _build/default/lib/proper/ebin .
 
-.dialyzer.plt: Makefile
-	-dialyzer --build_plt \
-		--statistics \
-		--output_plt .dialyzer.plt \
-		--apps erts kernel stdlib sasl compiler \
-		crypto public_key asn1 inets ssl \
-		mnesia xmerl \
-		edoc eunit \
-		tools syntax_tools runtime_tools webtool
+dialyzer: .plt/proper_plt compile
+	dialyzer -n -nn --plt $< -Wunmatched_returns -Wunknown ebin
 
-run-dialyzer:
-	dialyzer \
-		--plt .dialyzer.plt \
-		$(DIALYZER_FLAGS) \
-		ebin $(find .  -path 'deps/*/ebin/*.beam')
+.plt/proper_plt: .plt
+	dialyzer --build_plt --output_plt $@ --apps erts kernel stdlib compiler crypto syntax_tools eunit
 
-dialyzer: .dialyzer.plt compile run-dialyzer
+check_escripts:
+	./scripts/check_escripts.sh make_doc
 
-check-escripts:
-	./check_escripts.sh make_doc write_compile_flags
+test: compile
+ifeq ($(COVER), true)
+	$(REBAR3) do eunit -c, cover, covertool generate
+else
+	$(REBAR3) eunit
+endif
 
-tests: compile
-	@$(REBAR) eunit
+test-examples:
+	$(REBAR3) eunit --dir=examples_test
 
-doc:
-	./make_doc
-
-pdf:
-	pandoc README.md -o README.pdf
+doc: compile
+	./scripts/make_doc
 
 clean:
-	./clean_temp.sh
+	./scripts/clean_temp.sh
 
 distclean: clean
-	rm -f include/compile_flags.hrl
-	@$(REBAR) clean
+	$(REBAR3) clean
+	$(RM) .plt/proper_plt
+	$(RM) -r _build ebin rebar3 rebar.lock
 
-rebuild: distclean include/compile_flags.hrl
-	@$(REBAR) compile
+rebuild: distclean compile
 
-retest: compile
-	rm -rf .eunit
-	@$(REBAR) eunit
+retest:
+	$(RM) -r _build/test/lib/proper/test
+	$(REBAR3) eunit

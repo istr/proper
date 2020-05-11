@@ -1,4 +1,7 @@
-%%% Copyright 2010-2011 Manolis Papadakis <manopapad@gmail.com>,
+%%% -*- coding: utf-8 -*-
+%%% -*- erlang-indent-level: 2 -*-
+%%% -------------------------------------------------------------------
+%%% Copyright 2010-2019 Manolis Papadakis <manopapad@gmail.com>,
 %%%                     Eirini Arvaniti <eirinibob@gmail.com>
 %%%                 and Kostis Sagonas <kostis@cs.ntua.gr>
 %%%
@@ -17,18 +20,30 @@
 %%% You should have received a copy of the GNU General Public License
 %%% along with PropEr.  If not, see <http://www.gnu.org/licenses/>.
 
-%%% @copyright 2010-2011 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
+%%% @copyright 2010-2019 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
 %%% @version {@version}
 %%% @author Manolis Papadakis
 %%% @doc This module tests whether native types are parsed outside of ?FORALLs.
 
--module(no_out_of_forall_test).
+-module(let_tests).
 -export([]).
+
+%% NOTE: Possibly here temporarily until the compiler's warnings are fixed.
+-export_type([rng/0]).
 
 -include_lib("proper/include/proper.hrl").
 
--spec foo() -> any().
-foo() -> ?LET(X, types_test1:exp1(), {42,X}).
+-spec foo_() -> any().
+foo_t() ->
+    ?LET(X, types_test1:exp1(), {42, X}).
 
 -spec prop_1() -> any().
-prop_1() -> ?FORALL(_, foo(), true).
+prop_1() ->
+    ?FORALL(_, foo_t(), true).
+
+-type rng() :: 17..54.
+bar_t() ->
+    ?LET(N, rng(), 3*N).
+
+prop_2() ->
+    ?FORALL(N, bar_t(), N < 124).

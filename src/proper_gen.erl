@@ -1,4 +1,7 @@
-%%% Copyright 2010-2013 Manolis Papadakis <manopapad@gmail.com>,
+%%% -*- coding: utf-8 -*-
+%%% -*- erlang-indent-level: 2 -*-
+%%% -------------------------------------------------------------------
+%%% Copyright 2010-2020 Manolis Papadakis <manopapad@gmail.com>,
 %%%                     Eirini Arvaniti <eirinibob@gmail.com>
 %%%                 and Kostis Sagonas <kostis@cs.ntua.gr>
 %%%
@@ -17,7 +20,7 @@
 %%% You should have received a copy of the GNU General Public License
 %%% along with PropEr.  If not, see <http://www.gnu.org/licenses/>.
 
-%%% @copyright 2010-2013 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
+%%% @copyright 2010-2020 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
 %%% @version {@version}
 %%% @author Manolis Papadakis
 
@@ -30,7 +33,8 @@
 %%% meant for demonstration purposes only.
 
 -module(proper_gen).
--export([pick/1, pick/2, pick/3, sample/1, sample/3, sampleshrink/1, sampleshrink/2]).
+-export([pick/1, pick/2, pick/3,
+	 sample/1, sample/3, sampleshrink/1, sampleshrink/2]).
 
 -export([safe_generate/1]).
 -export([generate/1, normal_gen/1, alt_gens/1, clean_instance/1,
@@ -43,16 +47,24 @@
 	 any_gen/1, native_type_gen/2, safe_weighted_union_gen/1,
 	 safe_union_gen/1]).
 
--export_type([instance/0, imm_instance/0, sized_generator/0, nosize_generator/0,
+%% Public API types
+-export_type([instance/0, seed/0, size/0]).
+%% Internal types
+-export_type([imm_instance/0, sized_generator/0, nosize_generator/0,
 	      generator/0, reverse_gen/0, combine_fun/0, alt_gens/0]).
 
 -include("proper_internal.hrl").
+
 -compile({parse_transform, vararg}).
 
 
 %%-----------------------------------------------------------------------------
 %% Types
 %%-----------------------------------------------------------------------------
+
+-type instance() :: term().
+-type seed()     :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
+-type size()     :: non_neg_integer().
 
 %% TODO: update imm_instance() when adding more types: be careful when reading
 %%	 anything that returns it
@@ -61,9 +73,10 @@
 		      | instance()
 		      | {'$used', imm_instance(), imm_instance()}
 		      | {'$to_part', imm_instance()}.
--type instance() :: term().
 %% A value produced by the random instance generator.
--type error_reason() :: 'arity_limit' | 'cant_generate' | {'typeserver',term()}.
+-type error_reason() :: 'arity_limit'
+                      | {'cant_generate',[mfa()]}
+                      | {'typeserver',term()}.
 
 % % @private
 -type sized_generator() :: fun((size()) -> imm_instance()).
@@ -96,6 +109,8 @@
 -type alt_gens() :: fun(() -> [imm_instance()]).
 % % @private
 -type fun_seed() :: {non_neg_integer(),non_neg_integer()}.
+%% @private_type
+-type freq_choices() :: [{proper_types:frequency(),proper_types:type()},...].
 
 
 %%-----------------------------------------------------------------------------
@@ -110,7 +125,7 @@ safe_generate(RawType) ->
 	ImmInstance -> {ok, ImmInstance}
     catch
 	throw:'$arity_limit'            -> {error, arity_limit};
-	throw:'$cant_generate'          -> {error, cant_generate};
+	throw:{'$cant_generate',MFAs}   -> {error, {cant_generate,MFAs}};
 	throw:{'$typeserver',SubReason} -> {error, {typeserver,SubReason}}
     end.
 
@@ -145,7 +160,7 @@ remove_parameters(Type) ->
 	{ok, Params} ->
 	    AllParams = erlang:get('$parameters'),
 	    case AllParams of
-		Params->
+		Params ->
 		    erlang:erase('$parameters');
 	        _ ->
 		    erlang:put('$parameters', AllParams -- Params)
@@ -157,8 +172,10 @@ remove_parameters(Type) ->
 
 -spec generate(proper_types:type(), non_neg_integer(),
 	       'none' | {'ok',imm_instance()}) -> imm_instance().
-generate(_Type, 0, none) ->
-    throw('$cant_generate');
+generate(Type, 0, none) ->
+    Constraints = proper_types:get_prop(constraints, Type),
+    MFAs = [eunit_lib:fun_parent(C) || {C, true} <- Constraints],
+    throw({'$cant_generate', lists:usort(MFAs)});
 generate(_Type, 0, {ok,Fallback}) ->
     Fallback;
 generate(Type, TriesLeft, Fallback) ->
@@ -196,10 +213,10 @@ generate(Type, TriesLeft, Fallback) ->
 pick(RawType) ->
     pick(RawType, 10).
 
-%% @equiv pick(Type, Size, now())
--spec pick(Type::proper_types:raw_type(), size()) -> {'ok', instance()} | 'error'.
+%% @equiv pick(Type, Size, os:timestamp())
+-spec pick(Type::proper_types:raw_type(), size()) -> {'ok',instance()} | 'error'.
 pick(RawType, Size) ->
-    pick(RawType, Size, now()).
+    pick(RawType, Size, os:timestamp()).
 
 %% @doc Generates a random instance of `Type', of size `Size' with seed `Seed'.
 -spec pick(Type::proper_types:raw_type(), size(), seed()) ->
@@ -208,7 +225,7 @@ pick(RawType, Size, Seed) ->
     proper:global_state_init_size_seed(Size, Seed),
     case clean_instance(safe_generate(RawType)) of
 	{ok,Instance} = Result ->
-	    Msg = "WARNING: Some garbage has been left in the process registry "
+	    Msg = "WARNING: Some garbage has been left in the process dictionary "
 		  "and the code server~n"
 		  "to allow for the returned function(s) to run normally.~n"
 		  "Please run proper:global_state_erase() when done.~n",
@@ -232,11 +249,7 @@ sample(RawType) ->
 %% `StartSize' up to `EndSize'.
 -spec sample(Type::proper_types:raw_type(), size(), size()) -> 'ok'.
 sample(RawType, StartSize, EndSize) when StartSize =< EndSize ->
-    Tests = EndSize - StartSize + 1,
-    Prop = ?FORALL(X, RawType, begin io:format("~p~n",[X]), true end),
-    Opts = [quiet,{start_size,StartSize},{max_size,EndSize},{numtests,Tests}],
-    _ = proper:quickcheck(Prop, Opts),
-    ok.
+    proper:gen_and_print_samples(RawType, StartSize, EndSize).
 
 %% @equiv sampleshrink(Type, 10)
 -spec sampleshrink(Type::proper_types:raw_type()) -> 'ok'.
@@ -264,11 +277,24 @@ sampleshrink(RawType, Size) ->
 -spec keep_shrinking(imm_instance(), [imm_instance()], proper_types:type()) ->
 	  [imm_instance(),...].
 keep_shrinking(ImmInstance, Acc, Type) ->
-    case proper_shrink:shrink(ImmInstance, Type, init) of
-	{[], _NewState} ->
+    keep_shrinking(ImmInstance, Acc, Type, init).
+
+keep_shrinking(ImmInstance, Acc, Type, State) ->
+    case proper_shrink:shrink(ImmInstance, Type, State) of
+	{[], done} -> %% no more shrinkers
 	    lists:reverse([ImmInstance|Acc]);
+	{[], NewState} ->
+	    %% try next shrinker
+	    keep_shrinking(ImmInstance, Acc, Type, NewState);
 	{[Shrunk|_Rest], _NewState} ->
-	    keep_shrinking(Shrunk, [ImmInstance|Acc], Type)
+        Acc2 = [ImmInstance|Acc],
+        case lists:member(Shrunk, Acc2) of
+            true ->
+                %% Avoid infinite loops
+                lists:reverse(Acc2);
+            false ->
+                keep_shrinking(Shrunk, Acc2, Type)
+        end
     end.
 
 -spec contains_fun(term()) -> boolean().
@@ -310,23 +336,23 @@ alt_gens(Type) ->
 	error         -> []
     end.
 
+-compile({inline, [clean_instance/1]}).
 %% @private
 -spec clean_instance(imm_instance()) -> instance().
 clean_instance({'$used',_ImmParts,ImmInstance}) ->
     clean_instance(ImmInstance);
 clean_instance({'$to_part',ImmInstance}) ->
     clean_instance(ImmInstance);
-clean_instance(ImmInstance) ->
-    if
-	is_list(ImmInstance) ->
-	    %% CAUTION: this must handle improper lists
-	    proper_arith:safe_map(fun clean_instance/1, ImmInstance);
-	is_tuple(ImmInstance) ->
-	    proper_arith:tuple_map(fun clean_instance/1, ImmInstance);
-	true ->
-	    ImmInstance
-    end.
+clean_instance(ImmInstance) when is_list(ImmInstance) ->
+    clean_instance_list(ImmInstance);
+clean_instance(ImmInstance) when is_tuple(ImmInstance) ->
+    list_to_tuple(clean_instance_list(tuple_to_list(ImmInstance)));
+clean_instance(ImmInstance) -> ImmInstance.
 
+%% CAUTION: this must handle improper lists
+clean_instance_list([H|T]) -> [clean_instance(H) | clean_instance_list(T)];
+clean_instance_list([])    -> [];
+clean_instance_list(Other) -> clean_instance(Other).
 
 %%-----------------------------------------------------------------------------
 %% Basic type generators
@@ -387,7 +413,7 @@ binary_rev(Binary) ->
     {'$used', binary_to_list(Binary), Binary}.
 
 %% @private
--spec binary_len_gen(length()) -> proper_types:type().
+-spec binary_len_gen(proper_types:length()) -> proper_types:type().
 binary_len_gen(Len) ->
     ?LET(Bytes,
 	 proper_types:vector(Len, proper_types:byte()),
@@ -419,7 +445,7 @@ bitstring_rev(BitString) ->
      BitString}.
 
 %% @private
--spec bitstring_len_gen(length()) -> proper_types:type().
+-spec bitstring_len_gen(proper_types:length()) -> proper_types:type().
 bitstring_len_gen(Len) ->
     BytesLen = Len div 8,
     BitsLen = Len rem 8,
@@ -451,12 +477,12 @@ distlist_gen(RawSize, Gen, NonEmpty) ->
     fixed_list_gen(InnerTypes).
 
 %% @private
--spec vector_gen(length(), proper_types:type()) -> [imm_instance()].
+-spec vector_gen(proper_types:length(), proper_types:type()) -> [imm_instance()].
 vector_gen(Len, ElemType) ->
     vector_gen_tr(Len, ElemType, []).
 
--spec vector_gen_tr(length(), proper_types:type(), [imm_instance()]) ->
-	  [imm_instance()].
+-spec vector_gen_tr(proper_types:length(), proper_types:type(),
+		    [imm_instance()]) -> [imm_instance()].
 vector_gen_tr(0, _ElemType, AccList) ->
     AccList;
 vector_gen_tr(Left, ElemType, AccList) ->
@@ -469,8 +495,7 @@ union_gen(Choices) ->
     generate(Type).
 
 %% @private
--spec weighted_union_gen([{frequency(),proper_types:type()},...]) ->
-	  imm_instance().
+-spec weighted_union_gen(freq_choices()) -> imm_instance().
 weighted_union_gen(FreqChoices) ->
     {_Choice,Type} = proper_arith:freq_choose(FreqChoices),
     generate(Type).
@@ -486,8 +511,7 @@ safe_union_gen(Choices) ->
     end.
 
 %% @private
--spec safe_weighted_union_gen([{frequency(),proper_types:type()},...]) ->
-         imm_instance().
+-spec safe_weighted_union_gen(freq_choices()) -> imm_instance().
 safe_weighted_union_gen(FreqChoices) ->
     {Choice,Type} = proper_arith:freq_choose(FreqChoices),
     try generate(Type)
@@ -620,10 +644,6 @@ function_body(Args, RetType, {Seed1,Seed2}) ->
 	    proper_symb:internal_eval(Ret)
     end.
 
--ifdef(USE_SFMT).
 update_seed(Seed) ->
-    sfmt:seed(Seed).
--else.
-update_seed(Seed) ->
-    put(random_seed, Seed).
--endif.
+    _ = rand:seed(exsplus, Seed),
+    ok.

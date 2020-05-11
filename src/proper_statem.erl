@@ -1,4 +1,7 @@
-%%% Copyright 2010-2013 Manolis Papadakis <manopapad@gmail.com>,
+%%% -*- coding: utf-8 -*-
+%%% -*- erlang-indent-level: 2 -*-
+%%% -------------------------------------------------------------------
+%%% Copyright 2010-2020 Manolis Papadakis <manopapad@gmail.com>,
 %%%                     Eirini Arvaniti <eirinibob@gmail.com>
 %%%                 and Kostis Sagonas <kostis@cs.ntua.gr>
 %%%
@@ -17,7 +20,7 @@
 %%% You should have received a copy of the GNU General Public License
 %%% along with PropEr.  If not, see <http://www.gnu.org/licenses/>.
 
-%%% @copyright 2010-2013 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
+%%% @copyright 2010-2020 Manolis Papadakis, Eirini Arvaniti and Kostis Sagonas
 %%% @version {@version}
 %%% @author Eirini Arvaniti
 
@@ -47,7 +50,7 @@
 %%%   repeatable testcases, which is essential for correct shrinking.</li>
 %%% </ul>
 %%% Since the actual results of symbolic calls are not known at generation time,
-%%% we use symbolic variables ({@type symb_var()}) to refer to them.
+%%% we use symbolic variables ({@type symbolic_var()}) to refer to them.
 %%% A command ({@type command()}) is a symbolic term, used to bind a symbolic
 %%% variable to the result of a symbolic call. For example:
 %%%
@@ -89,7 +92,7 @@
 %%% The following functions must be exported from the callback module
 %%% implementing the abstract state machine:
 %%% <ul>
-%%% <li>`initial_state() ::' {@type symbolic_state()}
+%%% <li>`initial_state() ->' {@type symbolic_state()}
 %%%   <p>Specifies the symbolic initial state of the state machine. This state
 %%%   will be evaluated at command execution time to produce the actual initial
 %%%   state. The function is not only called at command generation time, but
@@ -97,21 +100,23 @@
 %%%   run (i.e. during normal execution, while shrinking and when checking a
 %%%   counterexample). For this reason, it should be deterministic and
 %%%   self-contained.</p></li>
-%%% <li>`command(S::'{@type symbolic_state()}`) ::' {@type proper_types:type()}
+%%% <li>`command(S::'{@type symbolic_state()}`) ->' {@type proper_types:type()}
 %%%   <p>Generates a symbolic call to be included in the command sequence,
 %%%   given the current state `S' of the abstract state machine. However,
 %%%   before the call is actually included, a precondition is checked. This
 %%%   function will be repeatedly called to produce the next call to be
 %%%   included in the test case.</p></li>
 %%% <li>`precondition(S::'{@type symbolic_state()}`,
-%%%                   Call::'{@type symb_call()}`) :: boolean()'
+%%%                   Call::'{@type symbolic_call()}`) -> boolean()'
 %%%   <p>Specifies the precondition that should hold so that `Call' can be
 %%%   included in the command sequence, given the current state `S' of the
 %%%   abstract state machine. In case precondition doesn't hold, a new call is
 %%%   chosen using the `command/1' generator. If preconditions are very strict,
 %%%   it will take a lot of tries for PropEr to randomly choose a valid command.
-%%%   Testing will be stopped in case the `constraint_tries' limit is reached
-%%%   (see the 'Options' section in the {@link proper} module documentation).
+%%%   Testing will be stopped if the `constraint_tries' limit is reached
+%%%   (see the 'Options' section in the {@link proper} module documentation) and
+%%%   a `{cant_generate,[{proper_statem,commands,4}]}' error will be produced in
+%%%   that case.
 %%%   Preconditions are also important for correct shrinking of failing
 %%%   testcases. When shrinking command sequences, we try to eliminate commands
 %%%   that do not contribute to failure, ensuring that all preconditions still
@@ -120,14 +125,14 @@
 %%%   different from the state it was when initially running the test.</p></li>
 %%% <li>`postcondition(S::'{@type dynamic_state()}`,
 %%%                    Call::'{@type symbolic_call()}`,
-%%%                    Res::term()) :: boolean()'
+%%%                    Res::term()) -> boolean()'
 %%%   <p>Specifies the postcondition that should hold about the result `Res' of
 %%%   performing `Call', given the dynamic state `S' of the abstract state
 %%%   machine prior to command execution. This function is called during
 %%%   runtime, this is why the state is dynamic.</p></li>
 %%% <li>`next_state(S::'{@type symbolic_state()} `|' {@type dynamic_state()}`,
 %%%                 Res::term(),
-%%%                 Call::'{@type symbolic_call()}`) ::'
+%%%                 Call::'{@type symbolic_call()}`) ->'
 %%%        {@type symbolic_state()} `|' {@type dynamic_state()}
 %%%   <p>Specifies the next state of the abstract state machine, given the
 %%%   current state `S', the symbolic `Call' chosen and its result `Res'. This
@@ -214,21 +219,54 @@
 %%% For PropEr to be able to detect race conditions, the code of the system
 %%% under test should be instrumented with `erlang:yield/0' calls to the
 %%% scheduler.
+%%%
+%%% == Stateful Targeted Testing ==
+%%% During testing of the system's behavior, there may be some failing command
+%%% sequences that the random property based testing does not find with ease,
+%%% or at all. In these cases, stateful targeted property based testing can help
+%%% find such edge cases, provided a utility value.
+%%%
+%%% ```prop_targeted_testing() ->
+%%%        ?FORALL_TARGETED(Cmds, proper_statem:targeted_commands(?MODULE),
+%%%                         begin
+%%%                             {History, State, Result} = proper_statem:run_commands(?MODULE, Cmds),
+%%%                             UV = uv(History, State, Result),
+%%%                             ?MAXIMIZE(UV),
+%%%                             cleanup(),
+%%%                             Result =:= ok
+%%%                         end).'''
+%%%
+%%% Νote that the `UV' value can be computed in any way fit, depending on the
+%%% use case. `uv/3' is used here as a dummy function which computes the
+%%% utility value.
 %%% @end
 
 -module(proper_statem).
--export([behaviour_info/1]).
+
 -export([commands/1, commands/2, parallel_commands/1, parallel_commands/2,
-	 more_commands/2]).
+         targeted_commands/1, targeted_commands/2, more_commands/2]).
 -export([run_commands/2, run_commands/3, run_parallel_commands/2,
 	 run_parallel_commands/3]).
 -export([state_after/2, command_names/1, zip/2]).
+%% Exported for PropEr internal usage.
+-export([next_weights/2, next_gen/2, next_gen/3]).
+
+
+-export_type([symbolic_var/0, symbolic_call/0, statem_result/0, next_fun/0]).
+
 
 -include("proper_internal.hrl").
 
 -define(WORKERS, 2).
 -define(LIMIT, 12).
 
+-define(COMMANDS_SZ_FACTOR, '$commands_size_factor').
+-define(RESIZE_FACTOR, proper_types:parameter(?COMMANDS_SZ_FACTOR, 1)).
+-define(SELECT_COMMAND(M, S, W),
+        case M of
+          proper_fsm -> proper_fsm:select_command(S, W);
+          _ -> select_command(M, S, W)
+        end).
 
 %% -----------------------------------------------------------------------------
 %% Exported only for testing purposes
@@ -236,9 +274,8 @@
 
 -export([index/2, all_insertions/3, insert_all/2]).
 -export([is_valid/4, args_defined/2]).
--export([get_next/6, mk_first_comb/3, fix_parallel/8, mk_dict/2]).
--export([execute/4, check/6, run/3, get_initial_state/2]).
-
+-export([get_next/6, mk_first_comb/3]).
+-export([execute/3, check/6, run/3, get_initial_state/2]).
 
 %% -----------------------------------------------------------------------------
 %% Type declarations
@@ -248,51 +285,53 @@
 -type symbolic_state()    :: term().
 %% @type dynamic_state()
 -type dynamic_state()     :: term().
--type symb_var()          :: {'var',pos_integer()}.
--type symb_call()         :: {'call',mod_name(),fun_name(),[term()]}.
--type command()           :: {'set',symb_var(),symb_call()}
-			     | {'init',symbolic_state()}.
+-type symbolic_var()      :: {'var',pos_integer()}.
+%% @type symbolic_call()
+-type symbolic_call()     :: {'call',mod_name(),fun_name(),[term()]}.
+-type command()           :: {'set',symbolic_var(),symbolic_call()}
+			   | {'init',symbolic_state()}.
 -type command_list()      :: [command()].
 -type parallel_testcase() :: {command_list(),[command_list()]}.
 -type parallel_history()  :: [{command(),term()}].
 -type history()           :: [{dynamic_state(),term()}].
 -type statem_result() :: 'ok'
-			 | 'initialization_error'
-			 | {'precondition',  'false' | proper:exception()}
-			 | {'postcondition', 'false' | proper:exception()}
-			 | proper:exception()
-			 | 'no_possible_interleaving'.
--type indices()     :: [pos_integer()].
+		       | 'initialization_error'
+		       | {'precondition',  'false' | proper:exception()}
+		       | {'postcondition', 'false' | proper:exception()}
+		       | proper:exception()
+		       | 'no_possible_interleaving'.
+-type len()         :: non_neg_integer().
+-type index()       :: pos_integer().
+-type indices()     :: [index()].
 -type combination() :: [{pos_integer(),indices()}].
--type lookup()      :: orddict:orddict().
-
--export_type([symb_var/0, symb_call/0, statem_result/0]).
+-type lookup()      :: orddict:orddict(index(),command()).
+-type weights()     :: #{term() => pos_integer()}.
+-type next_base()   :: {weights(), command_list()}.
+-type next_temp()   :: {proper_gen_next:depth(), proper_gen_next:temperature()}.
+-type next_fun()    :: fun((next_base(), next_temp()) -> proper_types:type()).
 
 
 %% -----------------------------------------------------------------------------
-%% Proper_statem behaviour
-%% ----------------------------------------------------------------------------
+%% Proper_statem behaviour callback functions
+%% -----------------------------------------------------------------------------
 
-%% @doc Specifies the callback functions that should be exported from a module
-%% implementing the `proper_statem' behaviour.
+-callback initial_state() -> symbolic_state().
 
--spec behaviour_info('callbacks') -> [{fun_name(),arity()}].
-behaviour_info(callbacks) ->
-    [{initial_state,0},
-      {command,1},
-      {precondition,2},
-      {postcondition,3},
-      {next_state,3}];
-behaviour_info(_Attribute) ->
-    undefined.
+-callback command(symbolic_state()) -> proper_types:type().
 
+-callback precondition(symbolic_state(), symbolic_call()) -> boolean().
+
+-callback postcondition(dynamic_state(), symbolic_call(), term()) -> boolean().
+
+-callback next_state(symbolic_state() | dynamic_state(), term(),
+		     symbolic_call()) -> symbolic_state() | dynamic_state().
 
 %% -----------------------------------------------------------------------------
 %% Sequential command generation
 %% -----------------------------------------------------------------------------
 
 %% @doc A special PropEr type which generates random command sequences,
-%% according to an absract state machine specification. The function takes as
+%% according to an abstract state machine specification. The function takes as
 %% input the name of a callback module, which contains the state machine
 %% specification. The initial state is computed by `Mod:initial_state/0'.
 
@@ -304,7 +343,8 @@ commands(Mod) ->
 	    ?LET(List,
 		 ?SIZED(Size,
 			proper_types:noshrink(
-			  commands(Size, Mod, InitialState, 1))),
+			  commands(Size * ?RESIZE_FACTOR,
+				   Mod, InitialState, 1))),
 		 proper_types:shrink_list(List)),
 	    is_valid(Mod, InitialState, Cmds, []))).
 
@@ -323,12 +363,14 @@ commands(Mod, InitialState) ->
 	    ?LET(List,
 		 ?SIZED(Size,
 			proper_types:noshrink(
-			  commands(Size, Mod, InitialState, 1))),
+			  commands(Size * ?RESIZE_FACTOR,
+				   Mod, InitialState, 1))),
 		 proper_types:shrink_list(List)),
 	    [{init,InitialState}|CmdTail]),
        is_valid(Mod, InitialState, Cmds, [])).
 
--spec commands(size(), mod_name(), symbolic_state(), pos_integer()) ->
+%% @private
+-spec commands(proper_gen:size(), mod_name(), symbolic_state(), pos_integer()) ->
          proper_types:type().
 commands(Size, Mod, State, Count) ->
     ?LAZY(
@@ -351,7 +393,7 @@ commands(Size, Mod, State, Count) ->
 
 -spec more_commands(pos_integer(), proper_types:type()) -> proper_types:type().
 more_commands(N, CmdType) ->
-    ?SIZED(Size, proper_types:resize(Size * N, CmdType)).
+    proper_types:with_parameter(?COMMANDS_SZ_FACTOR, N, CmdType).
 
 
 %% -----------------------------------------------------------------------------
@@ -426,7 +468,7 @@ parallel_shrinker(Mod, [{init,I} = Init|Seq], Parallel) ->
 		fun(P) -> is_valid(Mod, I, Seq1 ++ P, []) end,
 		Parallel1));
 parallel_shrinker(Mod, Seq, Parallel) ->
-    I= Mod:initial_state(),
+    I = Mod:initial_state(),
     ?SUCHTHAT({Seq1, Parallel1},
 	      ?LET(ParInstances,
 		   [proper_types:shrink_list(P) || P <- Parallel],
@@ -437,7 +479,7 @@ parallel_shrinker(Mod, Seq, Parallel) ->
 		fun(P) -> is_valid(Mod, I, Seq1 ++ P, []) end,
 		Parallel1)).
 
--spec move_shrinker(command_list(), [command_list()], pos_integer()) ->
+-spec move_shrinker(command_list(), [command_list()], index()) ->
 	 proper_types:type().
 move_shrinker(Seq, Par, 1) ->
     ?SHRINK({Seq, Par},
@@ -449,6 +491,188 @@ move_shrinker(Seq, Par, I) ->
 		 [{Seq ++ Slice, remove_slice(I, Slice, Par)}
 		  || Slice <- get_slices(lists:nth(I, Par))]),
 	 move_shrinker(NewSeq, NewPar, I-1)).
+
+
+%% -----------------------------------------------------------------------------
+%% Targeted command generation
+%% -----------------------------------------------------------------------------
+
+
+%% @doc A special PropEr type which generates random command sequences,
+%% according to an abstract state machine specification and taking into
+%% consideration a utility value. The function takes as input the name of
+%% a callback module, which contains the state machine specification. The
+%% initial state is computed by `Mod:initial_state/0'.
+
+-spec targeted_commands(mod_name()) -> proper_types:type().
+targeted_commands(Mod) ->
+  proper_types:add_prop(is_user_nf_stateful, true,
+                        ?USERNF(targeted_commands_gen(Mod),
+                                next_commands_gen(Mod))).
+
+%% @doc Similar to {@link targeted_commands/1}, but generated command sequences
+%% always start at a given state. In this case, the first command is always
+%% `{init, InitialState}' and is used to correctly initialize the state
+%% every time the command sequence is run (i.e. during normal execution,
+%% while shrinking and when checking a counterexample). In this case,
+%% `Mod:initial_state/0' is not called.
+
+-spec targeted_commands(mod_name(), symbolic_state()) -> proper_types:type().
+targeted_commands(Mod, InitialState) ->
+  proper_types:add_prop(is_user_nf_stateful, true,
+                        ?USERNF(targeted_commands_gen(Mod, InitialState),
+                                next_commands_gen(Mod, InitialState))).
+
+%% @private
+-spec targeted_commands_gen(mod_name()) -> proper_types:type().
+targeted_commands_gen(Mod) ->
+  InitialState = Mod:initial_state(),
+  ?LET(Cmds, ?LAZY(commands(Mod)),
+       {finalize_weights(Mod, InitialState, Cmds, maps:new()), Cmds}).
+
+%% @private
+-spec targeted_commands_gen(mod_name(), symbolic_state()) ->
+        proper_types:type().
+targeted_commands_gen(Mod, InitialState) ->
+  ?LET(Cmds, ?LAZY(commands(Mod, InitialState)),
+       {finalize_weights(Mod, InitialState, Cmds, maps:new()), Cmds}).
+
+%% @private
+-spec next_commands_gen(mod_name()) -> next_fun().
+next_commands_gen(Mod) ->
+  fun ({Weights, _Cmds}, {_D, T}) ->
+      NewWeights = next_weights(Weights, T),
+      CmdsGen = next_gen(Mod, NewWeights),
+      InitialState = Mod:initial_state(),
+      ?SHRINK(
+         ?LET(Cmds, ?LAZY(CmdsGen),
+              {finalize_weights(Mod, InitialState, Cmds, NewWeights), Cmds}),
+         [CmdsGen])
+  end.
+
+%% @private
+-spec next_commands_gen(mod_name(), symbolic_state()) -> next_fun().
+next_commands_gen(Mod, InitialState) ->
+  fun ({Weights, _Cmds}, {_D, T}) ->
+      NewWeights = next_weights(Weights, T),
+      CmdsGen = next_gen(Mod, NewWeights, InitialState),
+      ?SHRINK(
+         ?LET(Cmds, ?LAZY(CmdsGen),
+              {finalize_weights(Mod, InitialState, Cmds, NewWeights), Cmds}),
+         [CmdsGen])
+  end.
+
+%% Produce the new random weights by adding or removing an integer
+%% value to the existing weights.
+
+%% @private
+-spec next_weights(weights(), proper_gen_next:temperature()) -> weights().
+next_weights(Weights, Temp) ->
+  Factor = round(Temp),
+  Base = ?RESIZE_FACTOR,
+  Low = -Base - Factor,
+  High = Base + Factor,
+  maps:map(fun (_Key, W) ->
+               max(1, W + proper_arith:rand_int(Low, High))
+           end, Weights).
+
+%% Used to return the generator for the commands of the targeted
+%% generation.
+
+%% @private
+-spec next_gen(mod_name(), weights()) -> proper_types:type().
+next_gen(Mod, Weights) ->
+  ?LET(InitialState, ?LAZY(Mod:initial_state()),
+       ?SUCHTHAT(
+          Cmds,
+          ?LET(List,
+               ?SIZED(Size,
+                      proper_types:noshrink(
+                        next_gen(Mod, Weights, InitialState,
+                                 Size * ?RESIZE_FACTOR, 1))),
+               proper_types:shrink_list(List)),
+          is_valid(Mod, InitialState, Cmds, []))).
+
+%% Used to return the generator for the commands of the targeted
+%% generation with an initial state provided by the user.
+
+%% @private
+-spec next_gen(mod_name(), weights(), symbolic_state()) -> proper_types:type().
+next_gen(Mod, Weights, InitialState) ->
+  ?SUCHTHAT(Cmds,
+            ?LET(CmdTail,
+                 ?LET(List,
+                      ?SIZED(Size,
+                             proper_types:noshrink(
+                               next_gen(Mod, Weights, InitialState,
+                                        Size * ?RESIZE_FACTOR, 1))),
+                      proper_types:shrink_list(List)),
+                 [{init, InitialState} | CmdTail]),
+            is_valid(Mod, InitialState, Cmds, [])).
+
+-spec next_gen(mod_name(), weights(), symbolic_state(), proper_gen:size(),
+               pos_integer()) -> proper_types:type().
+next_gen(Mod, Weights, State, Size, Count) ->
+  ?LAZY(proper_types:frequency(
+          [{1, []},
+           {Size, ?LET(Call,
+                       ?SUCHTHAT(X, ?SELECT_COMMAND(Mod, State, Weights),
+                                 Mod:precondition(State, X)),
+                       begin
+                         Var = {var, Count},
+                         NextState = Mod:next_state(State, Var, Call),
+                         ?LET(Cmds,
+                              next_gen(Mod, Weights, NextState,
+                                       Size - 1, Count + 1),
+                              [{set, Var, Call} | Cmds])
+                       end)}])).
+
+%% Commands are selected according to the weights found in the
+%% map provided, or from a `weight/1' callback.
+
+-spec select_command(mod_name(), symbolic_state(), weights()) ->
+        proper_types:type().
+select_command(Mod, State, Weights) ->
+  SelectAux =
+    fun ({call, _Mod, Call, _Args} = SymbCall) ->
+        Weight = maps:get(Call, Weights, 1),
+        {Weight, SymbCall};
+        ({Freq, {call, _Mod, Call, _Args} = SymbCall}) ->
+        Weight = max(Freq, maps:get(Call, Weights, Freq)),
+        {Weight, SymbCall}
+    end,
+  Cmds = get_commands(Mod:command(State)),
+  WeightedCmds = lists:map(SelectAux, Cmds),
+  proper_types:frequency(WeightedCmds).
+
+%% Track all the commands and add unknown to the weights map.
+
+-spec finalize_weights(mod_name(), symbolic_state(), command_list(),
+                       weights()) -> weights().
+finalize_weights(_Mod, _State, [], Weights) -> Weights;
+finalize_weights(Mod, InitialState, Cmds, Weights) ->
+  FinWeightsAux =
+    fun ({init, _InitialState}, Acc) -> Acc;
+        ({set, Var, SymbCall}, {State, Ws}) ->
+        FoldAux =
+          fun ({call, _Mod, Call, _Args}, Acc) ->
+              case maps:is_key(Call, Acc) of
+                true -> Acc;
+                false -> maps:put(Call, 1, Acc)
+              end;
+              ({Freq, {call, _Mod, Call, _Args}}, Acc) ->
+              case maps:is_key(Call, Acc) of
+                true -> Acc;
+                false -> maps:put(Call, Freq, Acc)
+              end
+          end,
+        NextState = Mod:next_state(State, Var, SymbCall),
+        AllCmds = get_commands(Mod:command(State)),
+        NewWs = lists:foldl(FoldAux, Ws, AllCmds),
+        {NextState, NewWs}
+    end,
+  {_S, NewWeights} = lists:foldl(FinWeightsAux, {InitialState, Weights}, Cmds),
+  NewWeights.
 
 
 %% -----------------------------------------------------------------------------
@@ -553,22 +777,22 @@ run_commands(Cmds, Env, Mod, History, State) ->
 	    end
     end.
 
--spec check_precondition(mod_name(), dynamic_state(), symb_call()) ->
+-spec check_precondition(mod_name(), dynamic_state(), symbolic_call()) ->
          boolean() | proper:exception().
 check_precondition(Mod, State, Call) ->
     try Mod:precondition(State, Call)
     catch
-	Kind:Reason ->
-	    {exception, Kind, Reason, erlang:get_stacktrace()}
+	?STACKTRACE(Kind, Reason, StackTrace) %, is in macro
+	{exception, Kind, Reason, StackTrace}
     end.
 
--spec check_postcondition(mod_name(), dynamic_state(), symb_call(), term()) ->
+-spec check_postcondition(mod_name(), dynamic_state(), symbolic_call(), term()) ->
          boolean() | proper:exception().
 check_postcondition(Mod, State, Call, Res) ->
     try Mod:postcondition(State, Call, Res)
     catch
-	Kind:Reason ->
-	    {exception, Kind, Reason, erlang:get_stacktrace()}
+	?STACKTRACE(Kind, Reason, StackTrace) %, is in macro
+	{exception, Kind, Reason, StackTrace}
     end.
 
 -spec safe_apply(mod_name(), fun_name(), [term()]) ->
@@ -577,8 +801,8 @@ safe_apply(M, F, A) ->
     try apply(M, F, A) of
 	Result -> {ok, Result}
     catch
-	Kind:Reason ->
-	    {error, {exception, Kind, Reason, erlang:get_stacktrace()}}
+	?STACKTRACE(Kind, Reason, StackTrace) %, is in macro
+	{error, {exception, Kind, Reason, StackTrace}}
     end.
 
 
@@ -595,8 +819,9 @@ safe_apply(M, F, A) ->
 %% <li>`Parallel_history' contains the execution history of each of the
 %%   concurrent tasks.</li>
 %% <li>`Result' specifies the outcome of the attemp to serialize command
-%%   execution, based on the results observed. It can be one of the following:
-%%   <ul><li> `ok' </li><li> `no_possible_interleaving' </li></ul> </li>
+%%   execution, based on the results observed. In addition to results
+%%   returned by {@link run_commands/2}, it can also be the atom
+%%   `no_possible_interleaving'.</li>
 %% </ul>
 
 -spec run_parallel_commands(mod_name(), parallel_testcase()) ->
@@ -614,7 +839,7 @@ run_parallel_commands(Mod, {_Sequential, _Parallel} = Testcase) ->
 run_parallel_commands(Mod, {Sequential, Parallel}, Env) ->
     case run(Mod, Sequential, Env) of
 	{{Seq_history, State, ok}, SeqEnv} ->
-	    F = fun(T) -> execute(T, SeqEnv, Mod, []) end,
+	    F = fun(T) -> execute(T, SeqEnv, Mod) end,
 	    Parallel_history = pmap(F, Parallel),
 	    case check(Mod, State, SeqEnv, false, [], Parallel_history) of
 		true ->
@@ -627,44 +852,34 @@ run_parallel_commands(Mod, {Sequential, Parallel}, Env) ->
     end.
 
 %% @private
--spec execute(command_list(), proper_symb:var_values(), mod_name(),
-	      parallel_history()) -> parallel_history().
-execute(Cmds, Env, Mod, History) ->
-    case Cmds of
-	[] ->
-	    lists:reverse(History);
-	[{set, {var,V}, {call,M,F,A}} = Cmd|Rest] ->
-	    M2 = proper_symb:eval(Env, M),
-	    F2 = proper_symb:eval(Env, F),
-	    A2 = proper_symb:eval(Env, A),
-	    Res = apply(M2, F2, A2),
-	    Env2 = [{V,Res}|Env],
-	    History2 = [{Cmd,Res}|History],
-	    execute(Rest, Env2, Mod, History2)
-    end.
+-spec execute(command_list(), proper_symb:var_values(), mod_name()) ->
+	 parallel_history().
+execute([], _Env, _Mod) -> [];
+execute([{set, {var,V}, {call,M,F,A}} = Cmd|Rest], Env, Mod) ->
+    M2 = proper_symb:eval(Env, M),
+    F2 = proper_symb:eval(Env, F),
+    A2 = proper_symb:eval(Env, A),
+    Res = apply(M2, F2, A2),
+    Env2 = [{V,Res}|Env],
+    [{Cmd,Res}|execute(Rest, Env2, Mod)].
 
 -spec pmap(fun((command_list()) -> parallel_history()), [command_list()]) ->
          [parallel_history()].
 pmap(F, L) ->
-    await(lists:reverse(spawn_jobs(F,L))).
+    await(spawn_jobs(F, L)).
 
 -spec spawn_jobs(fun((command_list()) -> parallel_history()),
 		 [command_list()]) -> [pid()].
 spawn_jobs(F, L) ->
     Parent = self(),
-    [spawn_link_cp(fun() -> Parent ! {self(),catch {ok,F(X)}} end)
-     || X <- L].
+    [spawn_link_cp(fun() -> Parent ! {self(),catch {ok,F(X)}} end) || X <- L].
 
 -spec await([pid()]) -> [parallel_history()].
-await(Pids) ->
-    await_tr(Pids, []).
-
--spec await_tr([pid()], [parallel_history()]) -> [parallel_history()].
-await_tr([], Acc) -> Acc;
-await_tr([H|T], Acc) ->
+await([]) -> [];
+await([H|T]) ->
     receive
 	{H, {ok, Res}} ->
-	    await_tr(T, [Res|Acc]);
+	    [Res|await(T)];
 	{H, {'EXIT',_} = Err} ->
 	    _ = [exit(Pid, kill) || Pid <- T],
 	    _ = [receive {P,_} -> d_ after 0 -> i_ end || P <- T],
@@ -713,7 +928,9 @@ check(Mod, State, Env, Changed, Tried, [P|ToTry]) ->
 %% {@link proper:aggregate/2} in order to collect statistics about command
 %% execution.
 
--spec command_names(command_list()) -> [mfa()].
+-spec command_names(command_list() | parallel_testcase()) -> [mfa()].
+command_names({Cmds, L}) ->
+    lists:flatten([command_names(Cmds)|[ command_names(Cs) || Cs <- L ]]);
 command_names(Cmds) ->
     [{M, F, length(Args)} || {set, _Var, {call,M,F,Args}} <- Cmds].
 
@@ -726,7 +943,7 @@ state_after(Mod, Cmds) ->
     element(1, state_env_after(Mod, Cmds)).
 
 -spec state_env_after(mod_name(), command_list()) ->
-         {symbolic_state(), [symb_var()]}.
+         {symbolic_state(), [symbolic_var()]}.
 state_env_after(Mod, Cmds) ->
     lists:foldl(fun({init,S}, _) ->
 			{S, []};
@@ -741,22 +958,16 @@ state_env_after(Mod, Cmds) ->
 %% useful for zipping a command sequence with its (failing) execution history.
 
 -spec zip([A], [B]) -> [{A,B}].
-zip(X, Y) ->
-    zip(X, Y, []).
-
--spec zip([A], [B], [{A,B}]) -> [{A,B}].
-zip([], _, Accum) -> lists:reverse(Accum);
-zip(_, [], Accum) -> lists:reverse(Accum);
-zip([X|Tail1], [Y|Tail2], Accum) ->
-    zip(Tail1, Tail2, [{X,Y}|Accum]).
-
+zip([A|X], [B|Y]) -> [{A,B}|zip(X, Y)];
+zip(_, []) -> [];
+zip([], _) -> [].
 
 %% -----------------------------------------------------------------------------
 %% Utility functions
 %% -----------------------------------------------------------------------------
 
 %% @private
--spec is_valid(mod_name(), symbolic_state(), command_list(), [symb_var()]) ->
+-spec is_valid(mod_name(), symbolic_state(), command_list(), [symbolic_var()]) ->
          boolean().
 is_valid(_Mod, _State, [], _SymbEnv) -> true;
 is_valid(Mod, _State, [{init,S}|Cmds], _SymbEnv) ->
@@ -767,17 +978,17 @@ is_valid(Mod, State, [{set, Var, {call,_M,_F,A} = Call}|Cmds], SymbEnv) ->
 			 [Var|SymbEnv]).
 
 %% @private
--spec args_defined([term()], [symb_var()]) -> boolean().
+-spec args_defined([term()], [symbolic_var()]) -> boolean().
 args_defined(List, SymbEnv) ->
    lists:all(fun (A) -> arg_defined(A, SymbEnv) end, List).
 
--spec arg_defined(term(), [symb_var()]) -> boolean().
+-spec arg_defined(term(), [symbolic_var()]) -> boolean().
 arg_defined({var,I} = V, SymbEnv) when is_integer(I) ->
     lists:member(V, SymbEnv);
 arg_defined(Tuple, SymbEnv) when is_tuple(Tuple) ->
     args_defined(tuple_to_list(Tuple), SymbEnv);
-arg_defined(List, SymbEnv) when is_list(List) ->
-    args_defined(List, SymbEnv);
+arg_defined([Head|Tail], SymbEnv) ->
+    arg_defined(Head, SymbEnv) andalso arg_defined(Tail, SymbEnv);
 arg_defined(_, _) ->
     true.
 
@@ -788,8 +999,8 @@ get_initial_state(Mod, Cmds) when is_list(Cmds) ->
     Mod:initial_state().
 
 %% @private
--spec fix_parallel(pos_integer(), non_neg_integer(), combination() | 'done',
-		   lookup(), mod_name(), symbolic_state(), [symb_var()],
+-spec fix_parallel(index(), len(), combination() | 'done',
+		   lookup(), mod_name(), symbolic_state(), [symbolic_var()],
 		   pos_integer()) -> [command_list()].
 fix_parallel(_, 0, done, _, _, _, _, _) ->
     exit(error);   %% not supposed to reach here
@@ -813,11 +1024,11 @@ fix_parallel(MaxIndex, Len, Comb, LookUp, Mod, State, SymbEnv, W) ->
     end.
 
 -spec can_parallelize([command_list()], mod_name(), symbolic_state(),
-		      [symb_var()]) -> boolean().
+		      [symbolic_var()]) -> boolean().
 can_parallelize(CmdLists, Mod, State, SymbEnv) ->
-    lists:all(fun(C) -> is_valid(Mod, State, C, SymbEnv) end, CmdLists)
-	andalso lists:all(fun(C) -> is_valid(Mod, State, C, SymbEnv) end,
-			  possible_interleavings(CmdLists)).
+    F = fun(C) -> is_valid(Mod, State, C, SymbEnv) end,
+    lists:all(F, CmdLists) andalso
+	lists:all(F, possible_interleavings(CmdLists)).
 
 %% @private
 -spec possible_interleavings([command_list()]) -> [command_list()].
@@ -846,7 +1057,7 @@ insert_all([X|[Y|Rest]], List) ->
 all_insertions(X, Limit, List) ->
     all_insertions_tr(X, Limit, 0, [], List, []).
 
--spec all_insertions_tr(term(), pos_integer(), non_neg_integer(),
+-spec all_insertions_tr(term(), pos_integer(), len(),
 			[term()], [term()], [[term()]]) -> [[term()]].
 all_insertions_tr(X, Limit, LengthFront, Front, [], Acc) ->
     case LengthFront < Limit of
@@ -864,11 +1075,11 @@ all_insertions_tr(X, Limit, LengthFront, Front, Back = [BackH|BackT], Acc) ->
     end.
 
 %% @private
--spec index(term(), [term(),...]) -> pos_integer().
+-spec index(term(), [term(),...]) -> index().
 index(X, List) ->
     index(X, List, 1).
 
--spec index(term(), [term(),...], pos_integer()) -> pos_integer().
+-spec index(term(), [term(),...], index()) -> index().
 index(X, [X|_], N) -> N;
 index(X, [_|Rest], N) -> index(X, Rest, N+1).
 
@@ -879,12 +1090,11 @@ mk_dict([{init,_}|T], N) -> mk_dict(T, N);
 mk_dict([H|T], N)        -> [{N,H}|mk_dict(T, N+1)].
 
 %% @private
--spec mk_first_comb(pos_integer(), non_neg_integer(), pos_integer()) ->
-    [{pos_integer(),[pos_integer()]},...].
+-spec mk_first_comb(pos_integer(), len(), pos_integer()) -> combination().
 mk_first_comb(N, Len, W) ->
     mk_first_comb_tr(1, N, Len, [], W).
 
--spec mk_first_comb_tr(pos_integer(), pos_integer(), non_neg_integer(),
+-spec mk_first_comb_tr(pos_integer(), pos_integer(), len(),
 		       combination(), pos_integer()) -> combination().
 mk_first_comb_tr(Start, N, _Len, Accum, 1) ->
     [{1,lists:seq(Start, N)}|Accum];
@@ -901,7 +1111,7 @@ lookup_cmd_lists(Combination, LookUp) ->
     [lookup_cmds(Indices, LookUp) || {_, Indices} <- Combination].
 
 %% @private
--spec get_next(combination(), non_neg_integer(), pos_integer(), indices(),
+-spec get_next(combination(), len(), index(), indices(),
 	       pos_integer(), pos_integer()) -> combination() | 'done'.
 get_next(L, _Len, _MaxIndex, Available, _Workers, 1) ->
     [{1,Available}|proplists:delete(1, L)];
@@ -927,7 +1137,7 @@ get_next(L, Len, MaxIndex, Available, Workers, N) ->
 		     Len, MaxIndex, Available -- C, Workers, N-1)
     end.
 
--spec next_comb(pos_integer(), indices(), indices()) -> indices() | 'done'.
+-spec next_comb(index(), indices(), indices()) -> indices() | 'done'.
 next_comb(MaxIndex, Indices, Available) ->
     Res = next_comb_tr(MaxIndex, lists:reverse(Indices), []),
     case is_well_defined(Res, Available) of
@@ -941,23 +1151,23 @@ is_well_defined(Comb, Available) ->
     lists:usort(Comb) =:= Comb andalso
 	lists:all(fun(X) -> lists:member(X, Available) end, Comb).
 
--spec next_comb_tr(pos_integer(), indices(), indices()) -> indices() | 'done'.
+-spec next_comb_tr(index(), indices(), indices()) -> indices() | 'done'.
 next_comb_tr(_MaxIndex, [], _Acc) ->
     done;
 next_comb_tr(MaxIndex, [MaxIndex | Rest], Acc) ->
     next_comb_tr(MaxIndex, Rest, [1 | Acc]);
 next_comb_tr(_MaxIndex, [X | Rest], Acc) ->
-    lists:reverse(Rest) ++ [X+1] ++ Acc.
+    lists:reverse(Rest, [X+1|Acc]).
 
--spec remove_slice(pos_integer(), command_list(), [command_list(),...]) ->
+-spec remove_slice(index(), command_list(), [command_list(),...]) ->
          [command_list(),...].
 remove_slice(Index, Slice, List) ->
     remove_slice_tr(Index, Slice, List, [], 1).
 
--spec remove_slice_tr(pos_integer(), command_list(), [command_list(),...],
+-spec remove_slice_tr(index(), command_list(), [command_list(),...],
 		      [command_list()], pos_integer()) -> [command_list(),...].
 remove_slice_tr(Index, Slice, [H|T], Acc, Index) ->
-    lists:reverse(Acc) ++ [H -- Slice] ++ T;
+    lists:reverse(Acc, [H -- Slice] ++ T);
 remove_slice_tr(Index, Slice, [H|T], Acc, N) ->
     remove_slice_tr(Index, Slice, T, [H|Acc], N+1).
 
@@ -983,3 +1193,65 @@ spawn_link_cp(ActualFun) ->
 	      ActualFun()
 	  end,
     spawn_link(Fun).
+
+-spec get_commands(proper_types:type()) ->
+        [symbolic_call()] | [{proper_types:frequency(), symbolic_call()}].
+get_commands(RawType) ->
+  Matchers = [{fun is_tuple_type/1, fun get_commands_tuple/1},
+              {fun is_oneof_type/1, fun get_commands_oneof/1},
+              {fun is_frequency_type/1, fun get_commands_frequency/1}],
+  (fun Aux([]) -> throw(type_not_supported);
+       Aux([{Guard, Getter} | Rest]) ->
+       case Guard(RawType) of
+         true -> Getter(RawType);
+         false -> Aux(Rest)
+       end
+  end)(Matchers).
+
+-spec has_same_generator(proper_types:type(), proper_types:type()) -> boolean().
+has_same_generator(RawType, RefType) ->
+  Type = proper_types:cook_outer(RawType),
+  MaybeGen = proper_types:find_prop(generator, Type),
+  MaybeRefGen = proper_types:find_prop(generator, RefType),
+  case {MaybeGen, MaybeRefGen} of
+    {{ok, Gen}, {ok, Gen}} -> true;
+    _ -> false
+  end.
+
+-spec is_tuple_type(proper_types:type()) -> boolean().
+is_tuple_type(RawType) ->
+  has_same_generator(RawType, proper_types:tuple([])).
+
+-spec get_commands_tuple(proper_types:type()) -> [symbolic_call()].
+get_commands_tuple(RawType) ->
+  Type = proper_types:cook_outer(RawType),
+  InternalTypes = proper_types:get_prop(internal_types, Type),
+  {CallType, ModType, CmdType, Args} = InternalTypes,
+  call = proper_types:get_prop(env, CallType),
+  Mod = proper_types:get_prop(env, ModType),
+  Cmd = proper_types:get_prop(env, CmdType),
+  [{call, Mod, Cmd, Args}].
+
+-spec is_oneof_type(proper_types:type()) -> boolean().
+is_oneof_type(RawType) ->
+  has_same_generator(RawType, proper_types:union([undefined])).
+
+-spec get_commands_oneof(proper_types:type()) -> [symbolic_call()].
+get_commands_oneof(RawType) ->
+  Type = proper_types:cook_outer(RawType),
+  Env = proper_types:get_prop(env, Type),
+  lists:flatmap(fun get_commands_tuple/1, Env).
+
+-spec is_frequency_type(proper_types:type()) -> boolean().
+is_frequency_type(RawType) ->
+  has_same_generator(RawType, proper_types:frequency([{1, undefined}])).
+
+-spec get_commands_frequency(proper_types:type()) ->
+        [{proper_types:frequency(), symbolic_call()}].
+get_commands_frequency(RawType) ->
+  Type = proper_types:cook_outer(RawType),
+  Env = proper_types:get_prop(env, Type),
+  SubEnv = proper_types:get_prop(subenv, Type),
+  Cmds = lists:flatmap(fun get_commands_tuple/1, Env),
+  Freqs = [element(1, X) || X <- SubEnv],
+  lists:zip(Freqs, Cmds).
